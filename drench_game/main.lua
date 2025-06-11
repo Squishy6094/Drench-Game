@@ -1,7 +1,6 @@
--- name: Soaked Project
--- name_actual: Drench Game
+-- name: Drench Game
 -- description: Don't leak this.
--- description_actual: Squid Game in Mario 64!\n\nCommisioned by Drenchy\nMod By EmilyEmmi\nTODO: more detailed credits
+-- description_actual: Squid Game in Mario 64!\n\nCommissioned by Drenchy\nInspired by Dani's \"Crab Game\"\n\nProgramming: EmilyEmmi\n\nMaps: biobak, EmilyEmmi, Woissil\n\nSoundtrack: murioz\n\nVoice Acting:\nEspi as Toad\nSqueex as Mingle Callout\nTrashcam as Waluigi
 -- category: gamemode
 -- incompatible: gamemode
 -- pausable: false
@@ -32,7 +31,9 @@ LEVEL_RGLIGHT = level_register('level_rglight_entry', COURSE_NONE, 'Red/Green Li
 LEVEL_LIGHTS_OUT = level_register('level_SGlobbydark_entry', COURSE_NONE, 'Lobby?', 'lobbydark', 28000, 0x50, 0x50, 0x50)
 LEVEL_MINGLE = level_register('level_mingle_entry', COURSE_NONE, 'Mingle', 'mingle', 28000, 0x28, 0x28, 0x28)
 LEVEL_KOTH = level_register('level_koth_entry', COURSE_NONE, 'K.O.T.H.', 'koth', 28000, 0x28, 0x28, 0x28)
-LEVEL_DUEL = level_register('level_arena_entry', COURSE_NONE, 'Duel', 'duek', 28000, 0x28, 0x28, 0x28) -- TODO: needs glowup
+LEVEL_DUEL = level_register('level_arena_entry', COURSE_NONE, 'Duel', 'duel', 28000, 0x28, 0x28, 0x28) -- TODO: needs glowup?
+LEVEL_TOAD_TOWN = level_register('level_toad_town_entry', COURSE_NONE, 'Toad Town', 'toadtown', 28000, 0x28, 0x28, 0x28)
+LEVEL_KOOPA_KEEP = level_register('level_bowser_castle_entry', COURSE_NONE, 'Koopa Keep', 'koopakeep', 28000, 0x28, 0x28, 0x28)
 gLevelValues.entryLevel = LEVEL_LOBBY
 
 GAME_MODE_DATA = {
@@ -51,10 +52,17 @@ GAME_MODE_DATA = {
             end
         end,
         victoryFunc = function(m)
-            return m.floor.type == SURFACE_TIMER_END
+            if (m.action & ACT_FLAG_AIR == 0 and m.floor and m.floor.type == SURFACE_TIMER_END) then
+                if gPlayerSyncTable[m.playerIndex].earnedPoints >= 20 then
+                    return true
+                elseif m.playerIndex == 0 then
+                    play_sound(SOUND_MENU_CAMERA_BUZZ, gGlobalSoundSource)
+                    djui_chat_message_create("\\#ff5050\\You aren't allowed to skip any glass panes!")
+                    set_to_spawn_pos(m, true)
+                end
+            end
+            return false
         end,
-        spawnPos = { x = 0, y = 1000, z = -8000 },
-        spawnAngle = 0,
     },
     [GAME_MODE_LIGHTS_OUT] = {
         name = "Lights Out",
@@ -93,9 +101,6 @@ GAME_MODE_DATA = {
                 network_send_include_self(true, { id = PACKET_BLACKOUT })
             end
         end,
-        spawnPos = { x = 0, y = 1000, z = 0 },
-        spawnDist = 1000,
-        spawnAngle = 0,
     },
     [GAME_MODE_RED_GREEN_LIGHT] = {
         name = "Red Light, Green Light",
@@ -107,11 +112,8 @@ GAME_MODE_DATA = {
         interact = PLAYER_INTERACTIONS_SOLID,
         kbStrength = 10,
         victoryFunc = function(m)
-            return m.floor.type == SURFACE_TIMER_END
+            return (m.floor and m.floor.type == SURFACE_TIMER_END)
         end,
-        spawnPos = { x = 0, y = 1000, z = 0 },
-        spawnAngle = 0x8000,
-        spawnLine = true,
     },
     [GAME_MODE_MINGLE] = {
         name = "Mingle",
@@ -123,8 +125,6 @@ GAME_MODE_DATA = {
         showHealth = true,
         roundTime = 13 * 30, -- 13 seconds
         music = "mingle",
-        spawnPos = { x = 0, y = 500, z = 0 },
-        spawnDist = 750,
         toEliminate = 0, -- so this game uses elimination logic for points
         marioUpdateFunc = function(m)
             if (not gGlobalSyncTable.mingleHurry) and (m.floor == nil or m.floor.object == nil) then
@@ -226,7 +226,7 @@ GAME_MODE_DATA = {
         name = "Star Steal",
         desc =
         "Get the Star, and hold it to increase your score! Hit a player to take the Star from them! You'll be eliminated if your score is too low. Hmmm, this seems familiar...",
-        level = LEVEL_WF,                   -- TODO: make this random, same with Bomb Tag
+        level = -1, -- selects toad town or koopa keep
         interact = PLAYER_INTERACTIONS_PVP, -- so invulnerability frames exist
         firstRoundTime = 2 * 60 * 30,       -- 2 minutes
         roundTime = 30 * 30,                -- 30 seconds
@@ -288,12 +288,19 @@ GAME_MODE_DATA = {
         name = "Bomb Tag",
         desc =
         "Don't hold a Bob-Omb! Tag another player to pass your Bob-Omb to them. If you're holding a Bob-Omb when time runs out... you can probably guess what happens.",
-        level = LEVEL_WF,                   -- TODO: make this random
+        level = -1, -- selects toad town or koopa keep
         interact = PLAYER_INTERACTIONS_PVP, -- so invulnerability frames exist
         kbStrength = 10,
         roundTime = 30 * 30,                -- 30 seconds
         marioUpdateFunc = function(m)       -- full health, and that's it
             m.health = 0x880
+            if m.action == ACT_LAVA_BOOST then
+                set_to_spawn_pos(m, true)
+                if not gPlayerSyncTable[m.playerIndex].holdingBomb then
+                    set_mario_action(m, ACT_GB_FALL, 0)
+                    m.freeze = 30
+                end
+            end
         end,
         toEliminate = 0,           -- so this game uses elimination logic for points
         eliminateFunc = function() -- eliminate all players that are holding a bomb
@@ -322,11 +329,26 @@ GAME_MODE_DATA = {
             if #aliveTable > 2 then
                 bombsToAssign = math.random(1, 2)
             end
+
+            -- shuffle table
+            for i = #aliveTable, 2, -1 do
+                local j = math.random(i)
+                aliveTable[i], aliveTable[j] = aliveTable[j], aliveTable[i]
+            end
+            -- sort table so that the players with the most points will get the bombs
+            -- (we still do the shuffle first in case of ties)
+            if not gGlobalSyncTable.eliminationMode then
+                table.sort(aliveTable, function(a, b)
+                    local aPoints = (gPlayerSyncTable[a].points or 0)
+                    local bPoints = (gPlayerSyncTable[b].points or 0)
+                    return aPoints > bPoints
+                end)
+            end
+
             while bombsToAssign ~= 0 and #aliveTable ~= 0 do
-                local tableIndex = math.random(1, #aliveTable)
-                local index = aliveTable[tableIndex]
+                local index = aliveTable[1]
                 gPlayerSyncTable[index].holdingBomb = true
-                table.remove(aliveTable, tableIndex)
+                table.remove(aliveTable, 1)
                 bombsToAssign = bombsToAssign - 1
             end
         end,
@@ -344,8 +366,6 @@ GAME_MODE_DATA = {
         marioUpdateFunc = function(m)       -- full health, and that's it
             m.health = 0x880
         end,
-        spawnPos = { x = -2400, y = 1000, z = 1486 },
-        spawnAngle = 17698,
     },
     [GAME_MODE_DUEL] = {
         name = "Duel",
@@ -440,7 +460,6 @@ GAME_MODE_DATA = {
             gGlobalSyncTable.round = gGlobalSyncTable.round - 1
             gGlobalSyncTable.freezeRoundTimer = true
             local aliveTable = {}
-            local topTie = false
             local maxHealth = 0xFF
             for_each_connected_player(function(index)
                 local sMario = gPlayerSyncTable[index]
@@ -449,9 +468,6 @@ GAME_MODE_DATA = {
                     local health = gMarioStates[index].health
                     if maxHealth < health then
                         maxHealth = health
-                        topTie = false
-                    elseif maxHealth == health then
-                        topTie = true
                     end
                 end
             end)
@@ -459,12 +475,6 @@ GAME_MODE_DATA = {
                 local m = gMarioStates[index]
                 if m.health < maxHealth then
                     eliminate_mario(m)
-                elseif topTie then
-                    if m.playerIndex == 0 then
-                        m.health = 0x100
-                    else
-                        network_send_to(m.playerIndex, true, { id = PACKET_ONE_HEALTH })
-                    end
                 end
             end
             return 0
@@ -522,6 +532,11 @@ GAME_MODE_DATA = {
                 return
             end
 
+            -- one health in sudden death
+            if m.health > 0x100 and gGlobalSyncTable.freezeRoundTimer then
+                m.health = 0x100
+            end
+
             if m.health <= 0xFF and not sMario.eliminated then
                 duelDeathTimer = duelDeathTimer + 1
                 if duelDeathTimer >= 20 then
@@ -531,10 +546,50 @@ GAME_MODE_DATA = {
                 duelDeathTimer = 0
             end
         end,
+    }
+}
+
+LEVEL_SPAWN_DATA = {
+    [LEVEL_LOBBY] = {
+        spawnPos = { x = 0, y = 1000, z = 0 },
+        spawnAngle = 0x8000,
+        spawnLine = true,
+    },
+    [LEVEL_GLASS] = {
+        spawnPos = { x = 0, y = 1000, z = -8000 },
+        spawnAngle = 0,
+    },
+    [LEVEL_LIGHTS_OUT] = {
+        spawnPos = { x = 0, y = 1000, z = 0 },
+        spawnDist = 1000,
+        spawnAngle = 0x8000,
+    },
+    [LEVEL_RGLIGHT] = {
+        spawnPos = { x = 0, y = 1000, z = 0 },
+        spawnAngle = 0x8000,
+        spawnLine = true,
+    },
+    [LEVEL_KOTH] = {
+        spawnPos = { x = -2400, y = 1000, z = 1486 },
+        spawnAngle = 17698,
+    },
+    [LEVEL_MINGLE] = {
+        spawnPos = { x = 0, y = 500, z = 0 },
+        spawnDist = 750,
+    },
+    [LEVEL_DUEL] = {
         spawnPos = { x = 0, y = 500, z = 0 },
         spawnDist = 2000,
         spawnAngle = 0,
-    }
+    },
+    [LEVEL_TOAD_TOWN] = {
+        spawnPos = { x = 0, y = 500, z = 0 },
+        spawnDist = 1100,
+    },
+    [LEVEL_KOOPA_KEEP] = {
+        spawnPos = { x = 1210, y = -737, z = -2088 },
+        spawnDist = 400,
+    },
 }
 
 SELECT_MODE_CHOOSE = 0
@@ -549,7 +604,7 @@ DUEL_STATE_END = 2
 gGlobalSyncTable.gameState = GAME_STATE_LOBBY
 gGlobalSyncTable.gameMode = 0
 gGlobalSyncTable.gameTimer = 0
-gGlobalSyncTable.gameLevel = 0
+gGlobalSyncTable.gameLevel = -1
 gGlobalSyncTable.miniGameNum = 0
 gGlobalSyncTable.round = 1
 gGlobalSyncTable.roundTimer = 0
@@ -564,6 +619,7 @@ gGlobalSyncTable.selectedMode = -1
 gGlobalSyncTable.percentToStart = 75
 gGlobalSyncTable.forceStart = false
 gGlobalSyncTable.allDuel = false
+gGlobalSyncTable.gameLevelOverride = -1
 
 gGlobalSyncTable.starStealOwner = 255
 gGlobalSyncTable.minglePlayerCount = 1
@@ -651,7 +707,7 @@ function sync_setup()
 
     local np = gNetworkPlayers[0]
     if np.currLevelNum == LEVEL_GLASS then
-        local toEliminate = calculate_players_to_eliminate(true, 0.5)
+        local toEliminate = calculate_players_to_eliminate((not gGlobalSyncTable.eliminationMode), 0.5)
 
         -- assign each pane its break status
         local glass = obj_get_first_with_behavior_id_and_field_s32(id_bhvGlass, 0x2F, 0)
@@ -690,26 +746,31 @@ function sync_setup()
             glass = obj_get_first_with_behavior_id_and_field_s32(id_bhvGlass, 0x2F, row)
         end
     end
-
-    -- TEMP
-    local m = gMarioStates[0]
-    if gGlobalSyncTable.gameMode == GAME_MODE_STAR_STEAL then
-        spawn_object_no_rotate(id_bhvStealStar, E_MODEL_STAR, m.spawnInfo.startPos.x + 500, m.floorHeight + 500,
-            m.spawnInfo.startPos.z, nil, true)
-    elseif gGlobalSyncTable.gameMode == GAME_MODE_KOTH then
-        --spawn_object_no_rotate(id_bhvKothArea, E_MODEL_KOTH_AREA, m.spawnInfo.startPos.x + 500, m.floorHeight, m.spawnInfo.startPos.z, nil, true)
-    end
 end
 
 hook_event(HOOK_ON_SYNC_VALID, sync_setup)
 
 localWasEliminated = false
+local finalWaterHeight = 0
 ---@param m MarioState
 function before_mario_update(m)
     menu_controls(m)
     local sMario = gPlayerSyncTable[m.playerIndex]
     if (not sMario.spectator) and (gGlobalSyncTable.gameState == GAME_STATE_LOBBY or gGlobalSyncTable.gameState == GAME_STATE_GAME_END) then
         return
+    end
+
+    -- update water in Toad Town
+    if gNetworkPlayers[0].currLevelNum == LEVEL_TOAD_TOWN then
+        if m.floor and m.floor.type == SURFACE_WATER then
+            finalWaterHeight = m.floorHeight + 20
+            set_water_level(0, m.floorHeight + 20, false)
+        else
+            if m.playerIndex == 0 then
+                finalWaterHeight = gLevelValues.floorLowerLimitMisc
+            end
+            set_water_level(0, gLevelValues.floorLowerLimitMisc, false)
+        end
     end
 
     -- Put mario in spectate action
@@ -735,6 +796,7 @@ hook_event(HOOK_BEFORE_MARIO_UPDATE, before_mario_update)
 
 local storedSafeScore = 0
 local marioPoleTime = {}
+local marioBounceTimer = {}
 local afkTimer = 0
 local afkSpectator = false
 ---@param m MarioState
@@ -745,15 +807,16 @@ function mario_update(m)
         storedSafeScore = get_safe_score(standings)
     end
 
+    -- update water in Toad Town
+    if m.playerIndex == MAX_PLAYERS-1 and gNetworkPlayers[0].currLevelNum == LEVEL_TOAD_TOWN then
+        set_water_level(0, finalWaterHeight, false)
+    end
+
     -- push mario out of ceilings
     if m.ceil and m.ceil.object == nil and m.pos.y + m.marioObj.hitboxHeight >= m.ceilHeight then
         local ceilAngle = atan2s(m.ceil.normal.z, m.ceil.normal.x);
         m.pos.x = m.pos.x + 10 * sins(ceilAngle)
         m.pos.z = m.pos.z + 10 * coss(ceilAngle)
-    end
-    -- no bljs
-    if m.action == ACT_LONG_JUMP and m.forwardVel < -60 then
-        m.forwardVel = -60
     end
 
     local np = gNetworkPlayers[m.playerIndex]
@@ -776,14 +839,14 @@ function mario_update(m)
     -- afk check
     if m.playerIndex == 0 then
         if (not inMenu) and m.controller.buttonDown == 0 and m.controller.stickX == 0 and m.controller.stickY == 0 then
-            if (not sMario.spectator) and gGlobalSyncTable.gameState == GAME_STATE_ACTIVE then
+            if (not sMario.spectator) and gGlobalSyncTable.gameState == GAME_STATE_ACTIVE and m.action ~= ACT_SPECTATE then
                 afkTimer = afkTimer + 1
                 if afkTimer == 50 * 30 then
                     djui_chat_message_create("\\#ff5050\\You will be forced to spectate if you don't move in 10 seconds!")
                 elseif afkTimer >= 60 * 30 then
-                    djui_chat_message_create("\\#ff5050\\You were made a spectator. Move again to cancel.")
                     afkSpectator = true
                     toggle_spectator()
+                    djui_chat_message_create("\\#ff5050\\You were made a spectator. Move again to cancel.")
                 end
             end
         else
@@ -796,13 +859,18 @@ function mario_update(m)
     end
 
     -- bouncy beds
-    if m.floor.type == SURFACE_0004 and m.action ~= ACT_SPECTATE then
+    if marioBounceTimer[m.playerIndex] == nil then
+        marioBounceTimer[m.playerIndex] = 0
+    elseif marioBounceTimer[m.playerIndex] ~= 0 then
+        marioBounceTimer[m.playerIndex] = marioBounceTimer[m.playerIndex] - 1
+    end
+    if m.floor and m.floor.type == SURFACE_0004 and m.action ~= ACT_SPECTATE then
         if m.pos.y + m.vel.y <= m.floorHeight then
             -- ignore fall damage
             m.peakHeight = m.pos.y
         end
 
-        if m.action & (ACT_FLAG_AIR | ACT_FLAG_ON_POLE) == 0 and m.health > 0xFF and m.ceilHeight - m.pos.y >= 300 then
+        if m.action & (ACT_FLAG_AIR | ACT_FLAG_ON_POLE) == 0 and m.health > 0xFF and marioBounceTimer[m.playerIndex] == 0 then
             if m.action == ACT_GROUND_POUND_LAND then
                 set_mario_action(m, ACT_TRIPLE_JUMP, 0)
                 m.vel.y = 80
@@ -813,6 +881,7 @@ function mario_update(m)
             end
             play_sound(SOUND_ACTION_BOUNCE_OFF_OBJECT, m.marioObj.header.gfx.cameraToObject)
             marioPoleTime[m.playerIndex] = 0
+            marioBounceTimer[m.playerIndex] = 5
         end
     end
 
@@ -820,17 +889,20 @@ function mario_update(m)
     if marioPoleTime[m.playerIndex] == nil then
         marioPoleTime[m.playerIndex] = 0
     end
-    if m.action == ACT_HOLDING_POLE or m.action == ACT_CLIMBING_POLE then
+    if m.action & ACT_FLAG_ON_POLE ~= 0 then
         marioPoleTime[m.playerIndex] = marioPoleTime[m.playerIndex] + 1
         local downVel = 0
-        if marioPoleTime[m.playerIndex] > 90 then
-            downVel = math.min((marioPoleTime[m.playerIndex] - 90) // 8, 24)
+        if marioPoleTime[m.playerIndex] > 150 then
+            downVel = math.min((marioPoleTime[m.playerIndex] - 150) // 8, 24)
         end
         
         if downVel > 0 then
             m.marioObj.oMarioPolePos = m.marioObj.oMarioPolePos - downVel
+            if m.action == ACT_TOP_OF_POLE then
+                set_mario_action(m, ACT_TOP_OF_POLE_TRANSITION, 1)
+            end
             set_mario_particle_flags(m, PARTICLE_DUST, 0)
-            if m.action == ACT_HOLDING_POLE then
+            if m.action ~= ACT_CLIMBING_POLE then
                 play_climbing_sounds(m, 2);
                 reset_rumble_timers(m);
                 set_sound_moving_speed(SOUND_BANK_MOVING, downVel * 2)
@@ -854,8 +926,12 @@ function mario_update(m)
         if not gData.fallDamage then
             m.peakHeight = m.pos.y -- disable fall damage
         end
+        if sMario.spectator and not sMario.eliminated then
+            eliminate_mario(m)
+        end
     else
         m.peakHeight = m.pos.y -- disable fall damage
+        m.health = 0x880
     end
 
     -- set description
@@ -892,6 +968,8 @@ function mario_update(m)
         else
             network_player_set_description(np, tostring(sMario.roundScore or 0), 255, 80, 80, 255)
         end
+    elseif gGlobalSyncTable.gameState == GAME_STATE_ACTIVE and gGlobalSyncTable.gameMode == GAME_MODE_BOMB_TAG and sMario.holdingBomb then
+        network_player_set_description(np, "Bomb", 255, 255, 80, 255)
     else
         network_player_set_description(np, "Alive", 80, 255, 80, 255)
     end
@@ -906,6 +984,7 @@ function mario_update(m)
     local warpLevel = -1
     if gGlobalSyncTable.gameState == GAME_STATE_LOBBY then
         warpLevel = LEVEL_LOBBY
+        gNametagsSettings.showHealth = false
         gServerSettings.playerInteractions = PLAYER_INTERACTIONS_NONE
         sMario.points = 0
         sMario.roundScore = 0
@@ -945,12 +1024,10 @@ function mario_update(m)
         end
 
         if gGlobalSyncTable.gameState == GAME_STATE_RULES then
-            if not gGlobalSyncTable.eliminationMode then
-                if gGlobalSyncTable.gameMode == GAME_MODE_DUEL then
-                    sMario.eliminated = (not sMario.validForDuel)
-                else
-                    sMario.eliminated = sMario.spectator or false
-                end
+            if gGlobalSyncTable.gameMode == GAME_MODE_DUEL then
+                sMario.eliminated = (not sMario.validForDuel)
+            elseif not gGlobalSyncTable.eliminationMode then
+                sMario.eliminated = sMario.spectator or false
             end
             sMario.earnedPoints = 0
             sMario.roundScore = 0
@@ -1054,11 +1131,39 @@ function update()
     elseif gGlobalSyncTable.gameState == GAME_STATE_ACTIVE or (gGlobalSyncTable.gameMode == GAME_MODE_DUEL and gGlobalSyncTable.gameState == GAME_STATE_MINI_END) then
         local gData = GAME_MODE_DATA[gGlobalSyncTable.gameMode or 0]
         currentMusic = gData.music or "slider"
+
+        -- dynamic track:
+        -- section 1: default
+        -- section 2: half are alive
+        -- section 3: 2 players left (takes priority over 2)
+        if currentMusic == "slider" then
+            local alivePlayers = 0
+            local validPlayers = 0
+            for_each_connected_player(function(index)
+                validPlayers = validPlayers + 1
+                local sMario = gPlayerSyncTable[index]
+                if not (sMario.eliminated) then
+                    alivePlayers = alivePlayers + 1
+                end
+            end)
+
+            local percentAlive = ((validPlayers ~= 0) and (alivePlayers / validPlayers)) or 0
+            if percentAlive == 1 then
+                -- do nothing; play section 1
+            elseif alivePlayers <= 2 then
+                -- this is first in case we're playing with a low amount of players.
+                -- section 2 is skipped in that case.
+                currentMusic = "slider3"
+            elseif percentAlive <= 0.5 then
+                currentMusic = "slider2"
+            end
+        end
+
         -- environment sounds for Red Light, Green Light
         if gGlobalSyncTable.gameMode == GAME_MODE_RED_GREEN_LIGHT and get_target_volume() ~= 0 then
             play_sound(SOUND_GENERAL2_BIRD_CHIRP2, gGlobalSoundSource)
         elseif gGlobalSyncTable.gameMode == GAME_MODE_DUEL and (duelEnding or gGlobalSyncTable.gameState ~= GAME_STATE_ACTIVE) then
-            --currentMusic = "finalOutro" -- TODO: implement
+            currentMusic = "finalOutro"
         end
     elseif gGlobalSyncTable.gameState == GAME_STATE_RULES then
         currentMusic = "scores"
@@ -1102,6 +1207,7 @@ function update()
     if gGlobalSyncTable.gameState ~= GAME_STATE_LOBBY and gGlobalSyncTable.gameState ~= GAME_STATE_SCORES then
         if network_is_server() then
             gGlobalSyncTable.selectedMode = -1
+            gGlobalSyncTable.gameLevelOverride = -1
             gGlobalSyncTable.forceStart = false
         end
     else
@@ -1145,6 +1251,19 @@ function update()
                     gGlobalSyncTable.gameWinner = -1
                     gGlobalSyncTable.roundTimer = 0
                     gGlobalSyncTable.eliminateThisRound = calculate_players_to_eliminate()
+                    -- pick toad town or koopa keep at random
+                    local gData = GAME_MODE_DATA[gGlobalSyncTable.gameMode or 0]
+                    if gData.level == -1 then
+                        if gGlobalSyncTable.gameLevelOverride ~= -1 then
+                            gGlobalSyncTable.gameLevel = gGlobalSyncTable.gameLevelOverride
+                        else
+                            local newLevel = LEVEL_TOAD_TOWN
+                            if math.random(0, 1) == 1 then
+                                newLevel = LEVEL_KOOPA_KEEP
+                            end
+                            gGlobalSyncTable.gameLevel = newLevel
+                        end
+                    end
                 end
             end
         else
@@ -1221,6 +1340,14 @@ function update()
             if (not gData.victoryFunc) and alivePlayers <= 1 and not do_solo_debug() then
                 miniGameEnd = true
             end
+            
+            -- cut Bomb Tag, Star Steal, and Mingle short in elimination mode if too many players are eliminated
+            if (not gData.victoryFunc) and gGlobalSyncTable.eliminationMode then
+                local toEliminate, hitMinimum = calculate_players_to_eliminate(false, 1) -- number here is irrelevant, just should be non-zero
+                if hitMinimum then
+                    miniGameEnd = true
+                end
+            end
 
             if not miniGameEnd then
                 gGlobalSyncTable.roundTimer = 0
@@ -1245,7 +1372,7 @@ function update()
                         else
                             sMario.earnedPoints = 20
                         end
-                    elseif gData.toEliminate and gGlobalSyncTable.round > 1 then
+                    elseif gData.toEliminate and gGlobalSyncTable.round > 1 and sMario.roundEliminated and sMario.roundEliminated >= 1 then
                         sMario.earnedPoints = math.floor(((sMario.roundEliminated - 1) / gGlobalSyncTable.round) * 20) -- points based on total rounds
                     end
                 end)
@@ -1370,6 +1497,19 @@ function update()
                         gGlobalSyncTable.eliminateThisRound = calculate_players_to_eliminate(not gGlobalSyncTable
                         .eliminationMode)
                         gGlobalSyncTable.gameState = GAME_STATE_RULES
+                        -- pick toad town or koopa keep at random
+                        local gData = GAME_MODE_DATA[gGlobalSyncTable.gameMode or 0]
+                        if gData.level == -1 then
+                            if gGlobalSyncTable.gameLevelOverride ~= -1 then
+                                gGlobalSyncTable.gameLevel = gGlobalSyncTable.gameLevelOverride
+                            else
+                                local newLevel = LEVEL_TOAD_TOWN
+                                if math.random(0, 1) == 1 then
+                                    newLevel = LEVEL_KOOPA_KEEP
+                                end
+                                gGlobalSyncTable.gameLevel = newLevel
+                            end
+                        end
                     end
                 end
             end
@@ -1455,7 +1595,7 @@ hook_event(HOOK_ON_PVP_ATTACK, on_pvp_attack)
 
 -- don't display nametags in lights out
 function on_nametags_render(index, name)
-    if index ~= 0 and gGlobalSyncTable.gameMode == GAME_MODE_LIGHTS_OUT then
+    if index ~= 0 and gGlobalSyncTable.gameMode == GAME_MODE_LIGHTS_OUT and gMarioStates[0].action ~= ACT_SPECTATE then
         return ""
     end
 end
@@ -1504,7 +1644,7 @@ end
 
 hook_event(HOOK_ON_PLAYER_DISCONNECTED, on_player_disconnected)
 
--- prevent OOB death
+-- prevent OOB death; add water effect to fountain on Toad Town
 ---@param m MarioState
 function override_geometry_inputs(m)
     if m.floor == nil and m.action ~= ACT_END_SEQUENCE then
@@ -1526,6 +1666,15 @@ function allow_interact(m, o, type)
 end
 
 hook_event(HOOK_ALLOW_INTERACT, allow_interact)
+
+-- Cap BLJS
+function before_set_mario_action(m, action)
+    if action == ACT_LONG_JUMP and m.forwardVel < -60 then
+        m.forwardVel = -60
+    end
+end
+
+hook_event(HOOK_BEFORE_SET_MARIO_ACTION, before_set_mario_action)
 
 -- custom action when losing Glass Bridge
 ---@param m MarioState
@@ -1653,10 +1802,6 @@ function on_packet_rejoin(data, self)
     end
 end
 
-function on_packet_one_health(data, self)
-    gMarioStates[0].health = 0x100
-end
-
 function on_packet_blackout(data, self)
     lightsOutBlackoutTimer = 90
 end
@@ -1681,25 +1826,25 @@ function on_packet_kill(data, self)
     if not np then return end
     local name = network_get_player_text_color_string(np.localIndex) .. np.name
     djui_chat_message_create("\\#ffff50\\You killed "..name.."!")
-    gMarioStates[0].healCounter = 32
+    if gGlobalSyncTable.freezeRoundTimer then
+        gMarioStates[0].healCounter = 31
+    end
 end
 
 PACKET_STAR_STEAL = 0
 PACKET_MINGLE_CALLOUT = 1
 PACKET_MINGLE_RESTART = 2
 PACKET_REJOIN = 3
-PACKET_ONE_HEALTH = 4
-PACKET_BLACKOUT = 5
-PACKET_MOD_CHOOSE = 6
-PACKET_NO_MODERATORS = 7
-PACKET_DAMAGE = 8
-PACKET_KILL = 9
+PACKET_BLACKOUT = 4
+PACKET_MOD_CHOOSE = 5
+PACKET_NO_MODERATORS = 6
+PACKET_DAMAGE = 7
+PACKET_KILL = 8
 sPacketTable = {
     [PACKET_STAR_STEAL] = on_packet_star_steal,
     [PACKET_MINGLE_CALLOUT] = on_packet_mingle_callout,
     [PACKET_MINGLE_RESTART] = on_packet_mingle_restart,
     [PACKET_REJOIN] = on_packet_rejoin,
-    [PACKET_ONE_HEALTH] = on_packet_one_health,
     [PACKET_BLACKOUT] = on_packet_blackout,
     [PACKET_MOD_CHOOSE] = on_packet_mod_choose,
     [PACKET_NO_MODERATORS] = on_packet_no_moderators,

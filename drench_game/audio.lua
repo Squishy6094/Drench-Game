@@ -3,11 +3,13 @@
 local musicData = {
     lobby = {audio = audio_stream_load("lobby.ogg"), loop = true},
     dire = {audio = audio_stream_load("dire.ogg"), loop = true, loopStart = 2188700, loopEnd = 6789957},
-    scores = {audio = audio_stream_load("scores.mp3"), loop = true},
+    scores = {audio = audio_stream_load("scores.ogg"), loop = true, loopStart = 883309, loopEnd = -1},
     mingle = {audio = audio_stream_load("mingle.mp3")},
     final = {audio = audio_stream_load("final.mp3"), loop = true, loopStart = 1616135, loopEnd = 7158082},
-    slider = {audio = audio_stream_load("sliderMadness.ogg"), loop = true}, -- TODO: this is meant to be dynamic
-    -- finalOutro = {audio = audio_stream_load("finalOutro.mp3")}, -- TODO: implement
+    slider = {audio = audio_stream_load("sliderMadness1.ogg"), loop = true, loopStart = 143624, loopEnd = -1},
+    slider2 = {audio = audio_stream_load("sliderMadness2.ogg"), loop = true},
+    slider3 = {audio = audio_stream_load("sliderMadness3.ogg"), loop = true},
+    finalOutro = {audio = audio_stream_load("finaloutro.ogg")},
 }
 
 local soundData = {
@@ -18,8 +20,8 @@ local soundData = {
     greenLightShort = audio_sample_load("greenLightShort.ogg"),
     greenLightLong = audio_sample_load("greenLightLong.ogg"),
     playerCallout1 = audio_sample_load("playerCallout1.mp3"),
-    playerCallout2 = audio_sample_load("playerCallout2.ogg"),
-    playerCallout3 = audio_sample_load("playerCallout3.ogg"),
+    playerCallout2 = audio_sample_load("playerCallout2.mp3"),
+    playerCallout3 = audio_sample_load("playerCallout3.mp3"),
     playerCallout4 = audio_sample_load("playerCallout4.mp3"),
 }
 
@@ -140,9 +142,8 @@ function test_loop_point()
         djui_chat_message_create("No point to test...")
         return true
     end
-    -- set 3 seconds before loop
-    audio_stream_set_position(thisMusic.audio, 0)
-    --audio_stream_set_position(thisMusic.audio, thisMusic.loopEnd // 44100 - 3)
+    -- set 3 seconds before loop?
+    audio_stream_set_position(thisMusic.audio, thisMusic.loopEnd // 44100 - 3)
     return true
 end
 if DEBUG_MODE then

@@ -264,7 +264,8 @@ calculates the number of players to eliminated this round, based on:
 function calculate_players_to_eliminate(ignoreEliminated, overrideRatio)
     local gData = GAME_MODE_DATA[gGlobalSyncTable.gameMode or 0]
     local ratio = overrideRatio or gData.toEliminate or 0
-    if ratio == 0 then return 0 end
+    local hitMinimum = false
+    if ratio == 0 then return 0, false end
     
     local alivePlayers = (do_solo_debug() and MAX_PLAYERS-1) or 0
     local connectedPlayers = alivePlayers
@@ -277,6 +278,7 @@ function calculate_players_to_eliminate(ignoreEliminated, overrideRatio)
     end)
     local maxToEliminate = math.ceil(ratio * alivePlayers)
 
+    -- new calculation for elimination mode
     if gGlobalSyncTable.eliminationMode then
         local eliminatePerGame = (connectedPlayers-1) / gGlobalSyncTable.maxMiniGames
         local goalAliveAfterGame = connectedPlayers - (eliminatePerGame * gGlobalSyncTable.miniGameNum) -- how many players we want alive at the end of this game
@@ -285,18 +287,22 @@ function calculate_players_to_eliminate(ignoreEliminated, overrideRatio)
         local roundTime = gData.roundTime or 0
         local maxTime = gData.maxTime or 5 * 30 * 60 -- default 5 minutes max
         local maxRounds = 1
-        if roundTime ~= 0 then
+        if roundTime > 0 then
             maxRounds = maxTime // roundTime
         end
         local roundsLeft = maxRounds - gGlobalSyncTable.round + 1
 
         -- divide left to eliminate by the amount of rounds to get the amount to eliminate this round
         -- note that the minimum is 1
-        maxToEliminate = math.max(leftToEliminate // roundsLeft, 1)
+        maxToEliminate = leftToEliminate // roundsLeft
+        if maxToEliminate <= 0 then
+            hitMinimum = true
+            maxToEliminate = 1
+        end
     elseif maxToEliminate >= alivePlayers then
         maxToEliminate = alivePlayers - 1
     end
-    return maxToEliminate
+    return maxToEliminate, hitMinimum
 end
 
 -- eliminates a player, setting their round eliminated field as well as their eliminated field
@@ -408,17 +414,15 @@ function set_to_spawn_pos(m, yPos)
     local spawnAngle = m.spawnInfo.startAngle.y
     local dist = 200
     local line = false
-    if gGlobalSyncTable.gameState ~= GAME_STATE_LOBBY and gGlobalSyncTable.gameState ~= GAME_STATE_GAME_END then
-        local gData = GAME_MODE_DATA[gGlobalSyncTable.gameMode or 0]
-        spawnPos = gData.spawnPos or spawnPos
-        spawnAngle = gData.spawnAngle or spawnAngle
-        dist = gData.spawnDist or dist
-        line = gData.spawnLine or false
-    else
-        spawnPos = {x = 0, y = 1000, z = 0}
-        spawnAngle = 0
-        dist = 0
+    
+    local spawnData = LEVEL_SPAWN_DATA[gNetworkPlayers[0].currLevelNum]
+    if spawnData then
+        spawnPos = spawnData.spawnPos or spawnPos
+        spawnAngle = spawnData.spawnAngle or spawnAngle
+        dist = spawnData.spawnDist or dist
+        line = spawnData.spawnLine or false
     end
+
     local angle = 0
     if m.action ~= ACT_SPECTATE then
         local alivePlayers = 0
@@ -432,6 +436,10 @@ function set_to_spawn_pos(m, yPos)
                 end
             end
         end, true)
+        if do_solo_debug() then
+            ourNum = 15
+            alivePlayers = 16
+        end
         if not line then
             angle = math.floor((ourNum / alivePlayers) * 0xFFFF) + spawnAngle
         else
@@ -448,7 +456,7 @@ function set_to_spawn_pos(m, yPos)
         set_mario_action(m, ACT_SPAWN_SPIN_AIRBORNE, 0)
         m.pos.y = spawnPos.y
         m.vel.y = 0
-        if line or dist < 500 then
+        if line or dist <= 200 then
             m.faceAngle.y = spawnAngle
         else
             m.marioObj.oPosX = m.pos.x
@@ -456,19 +464,22 @@ function set_to_spawn_pos(m, yPos)
             m.faceAngle.y = obj_angle_to_point(m.marioObj, spawnPos.x, spawnPos.z)
         end
         m.intendedYaw = m.faceAngle.y
-        --djui_chat_message_create(tostring(m.faceAngle.y)..":"..tostring(dist))
-        reset_camera(m.area.camera)
 
-        -- set camera to behind mario? (this doesn't actually work like, at all. I don't care though)
-        gLakituState.pos.x = m.pos.x + sins(m.faceAngle.y + 0x8000) * 2000
-        gLakituState.pos.z = m.pos.z + coss(m.faceAngle.y + 0x8000) * 2000
-        gLakituState.posHSpeed = 0
-        gLakituState.posVSpeed = 0
-        vec3f_copy(m.area.camera.pos, gLakituState.pos)
-        vec3f_copy(gLakituState.curPos, gLakituState.pos)
-        vec3f_copy(gLakituState.goalPos, gLakituState.pos)
-        m.area.camera.yaw = m.faceAngle.y + 0x8000
-        --center_rom_hack_camera()
+        if m.playerIndex == 0 then
+            --djui_chat_message_create(tostring(m.faceAngle.y)..":"..tostring(dist))
+            reset_camera(m.area.camera)
+
+            -- set camera to behind mario? (this doesn't actually work like, at all. I don't care though)
+            gLakituState.pos.x = m.pos.x + sins(m.faceAngle.y + 0x8000) * 2000
+            gLakituState.pos.z = m.pos.z + coss(m.faceAngle.y + 0x8000) * 2000
+            gLakituState.posHSpeed = 0
+            gLakituState.posVSpeed = 0
+            vec3f_copy(m.area.camera.pos, gLakituState.pos)
+            vec3f_copy(gLakituState.curPos, gLakituState.pos)
+            vec3f_copy(gLakituState.goalPos, gLakituState.pos)
+            m.area.camera.yaw = m.faceAngle.y + 0x8000
+            --center_rom_hack_camera()
+        end
     end
 end
 

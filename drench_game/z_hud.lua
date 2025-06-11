@@ -72,6 +72,7 @@ function on_hud_render()
     elseif gGlobalSyncTable.gameState == GAME_STATE_RULES then
         local gData = GAME_MODE_DATA[gGlobalSyncTable.gameMode]
         add_line_to_table(sideBarLines, "\\#ffff50\\" .. gData.name, lengthLimit)
+        table.insert(sideBarLines, "Minigame " .. gGlobalSyncTable.miniGameNum .. "/" .. gGlobalSyncTable.maxMiniGames)
         table.insert(sideBarLines, "")
         local desc = gData.desc
         if (is_final_duel() or gGlobalSyncTable.eliminationMode) and gData.descElim then
@@ -586,14 +587,19 @@ function duel_hud()
 end
 
 -- the menu from geoguessr, which is from shine thief... wow
+local menuSelectedMode = -1
 function build_game_mode_menu(menu)
     for i = 0, GAME_MODE_MAX - 1 do
         local gData = GAME_MODE_DATA[i]
         table.insert(menu, {
             gData.name,
             function()
+                menuSelectedMode = i
                 if i == GAME_MODE_DUEL then
                     enter_menu(4)
+                    return
+                elseif gData.level == -1 then
+                    enter_menu(5)
                     return
                 end
                 gGlobalSyncTable.selectedMode = i
@@ -859,7 +865,39 @@ menu_data = {
                 inMenu = false
             end,
         },
-    }
+    },
+    [5] = {
+        {
+            "Toad Town",
+            function()
+                gGlobalSyncTable.gameLevelOverride = LEVEL_TOAD_TOWN
+                gGlobalSyncTable.selectedMode = menuSelectedMode
+                local gData = GAME_MODE_DATA[menuSelectedMode or 0]
+                djui_chat_message_create("Selected \\#ffff50\\"..gData.name)
+                inMenu = false
+            end,
+        },
+        {
+            "Koopa Keep",
+            function()
+                gGlobalSyncTable.gameLevelOverride = LEVEL_KOOPA_KEEP
+                gGlobalSyncTable.selectedMode = menuSelectedMode
+                local gData = GAME_MODE_DATA[menuSelectedMode or 0]
+                djui_chat_message_create("Selected \\#ffff50\\"..gData.name)
+                inMenu = false
+            end,
+        },
+        {
+            "Random",
+            function()
+                gGlobalSyncTable.gameLevelOverride = -1
+                gGlobalSyncTable.selectedMode = menuSelectedMode
+                local gData = GAME_MODE_DATA[menuSelectedMode or 0]
+                djui_chat_message_create("Selected \\#ffff50\\"..gData.name)
+                inMenu = false
+            end,
+        },
+    },
 }
 
 -- show the menu
@@ -1153,6 +1191,7 @@ function open_menu()
         menu_history = {}
         sMenuInputsDown = gMarioStates[0].controller.buttonDown
         enter_menu(1, 1, true)
+        play_sound(SOUND_MENU_PAUSE, gGlobalSoundSource)
     end
     return true
 end

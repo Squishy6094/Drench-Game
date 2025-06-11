@@ -3,7 +3,7 @@ E_MODEL_SCREEN = smlua_model_util_get_id("screen_geo")
 E_MODEL_MINGLE_CAROUSEL = smlua_model_util_get_id("carousel_geo")
 E_MODEL_LOCK_SWITCH = smlua_model_util_get_id("lockswitch_geo")
 E_MODEL_MINGLE_DOOR = smlua_model_util_get_id("mingleDoor_geo")
-E_MODEL_KOTH_AREA = smlua_model_util_get_id("kothArea_geo") -- wip
+E_MODEL_KOTH_AREA = smlua_model_util_get_id("kothArea_geo")
 
 ---@param o Object
 function button_init(o)
@@ -47,11 +47,24 @@ id_bhvButton = hook_behavior(nil, OBJ_LIST_GENACTOR, false, button_init, button_
 function screen_init(o)
     obj_set_model_extended(o, E_MODEL_SCREEN)
     o.oFlags = OBJ_FLAG_UPDATE_GFX_POS_AND_ANGLE
+    network_init_object(o, false, {"oAnimState"})
 end
 
 ---@param o Object
 function screen_loop(o)
-    -- WIP
+    if gGlobalSyncTable.gameState ~= GAME_STATE_LOBBY then
+        o.oAnimState = 0
+        return
+    end
+
+    -- switch ad every minute
+    if o.oAnimState == 0 or (network_is_server() and o.oTimer >= 60 * 30) then
+        o.oTimer = 0
+        o.oAnimState = math.random(1, 5)
+        if network_is_server() then
+            network_send_object(o, false)
+        end
+    end
 end
 
 id_bhvScreen = hook_behavior(nil, OBJ_LIST_LEVEL, false, screen_init, screen_loop, "bhvScreen")
@@ -201,12 +214,18 @@ function glass_loop(o)
         if sMario0.earnedPoints == nil then return end
         local newPoints = (o.oBehParams2ndByte*2-sMario0.earnedPoints+2)
         if m0.marioObj and m0.marioObj.platform == o and (not sMario0.eliminated) and newPoints > 0 then
-            -- points are still calculated even in elimination mode because they are used to determine if PVP is allowed
-            if not gGlobalSyncTable.eliminationMode then
-                djui_chat_message_create("\\#ffff50\\+"..newPoints.." points")
-                play_sound(SOUND_GENERAL_COIN, gGlobalSoundSource)
+            if newPoints <= 2 then
+                -- points are still calculated even in elimination mode because they are used to determine if PVP is allowed
+                if not gGlobalSyncTable.eliminationMode then
+                    djui_chat_message_create("\\#ffff50\\+"..newPoints.." points")
+                    play_sound(SOUND_GENERAL_COIN, gGlobalSoundSource)
+                end
+                sMario0.earnedPoints = sMario0.earnedPoints + newPoints
+            else
+                play_sound(SOUND_MENU_CAMERA_BUZZ, gGlobalSoundSource)
+                djui_chat_message_create("\\#ff5050\\You aren't allowed to skip any glass panes!")
+                set_to_spawn_pos(m0, true)
             end
-            sMario0.earnedPoints = sMario0.earnedPoints + newPoints
         end
         return
     elseif o.oAction ~= 0 then
@@ -419,9 +438,9 @@ function rg_doll_loop(o)
                         eliminate_mario(m)
                         -- points based on distance
                         local spawnPos = m.spawnInfo.startPos
-                        local gData = GAME_MODE_DATA[gGlobalSyncTable.gameMode or 0]
-                        if gData and gData.spawnPos then
-                            spawnPos = gData.spawnPos
+                        local spawnData = LEVEL_SPAWN_DATA[gNetworkPlayers[0].currLevelNum]
+                        if spawnData and spawnData.spawnPos then
+                            spawnPos = spawnData.spawnPos
                         end
                         if m.pos.z >= spawnPos.z then
                             sMario.earnedPoints = 0
