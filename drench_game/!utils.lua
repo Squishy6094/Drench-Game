@@ -312,7 +312,7 @@ function eliminate_mario(m)
     if not sMario.eliminated then
         sMario.eliminated = true
         sMario.roundEliminated = gGlobalSyncTable.round
-        if gGlobalSyncTable.gameMode == GAME_MODE_DUEL and duelLastAttacker ~= -1 then
+        if m.playerIndex == 0 and gGlobalSyncTable.gameMode == GAME_MODE_DUEL and duelLastAttacker ~= -1 then
             network_send_to(duelLastAttacker, true, {
                 id = PACKET_KILL,
                 from = network_global_index_from_local(0)
@@ -325,6 +325,7 @@ end
 -- using the specified field as the score (subtracting subField)
 function get_standings_table(field, subField)
     local standings = {}
+    local teamScore = {}
     for_each_connected_player(function(i)
         local sMario = gPlayerSyncTable[i]
         if (field == "points" or field == "earnedPoints") or (not sMario.eliminated) then
@@ -333,9 +334,33 @@ function get_standings_table(field, subField)
                 score = score - (sMario[subField] or 0)
             end
             table.insert(standings, {i, score})
+            -- use team score for points field
+            if field == "points" and sMario.team and sMario.team ~= 0 then
+                if teamScore[sMario.team] then
+                    teamScore[sMario.team] = teamScore[sMario.team] + score
+                else
+                    teamScore[sMario.team] = score
+                end
+            end
         end
     end)
+
+    -- use team score for points field
+    if gGlobalSyncTable.teamCount ~= 0 and field == "points" then
+        for i,data in ipairs(standings) do
+            local sMario = gPlayerSyncTable[data[1]]
+            if sMario.team and sMario.team ~= 0 then
+                standings[i][2] = teamScore[sMario.team] or 0
+            end
+        end
+    end
+
     table.sort(standings, function(a,b)
+        if a[2] == b[2] then
+            local sMarioA = gPlayerSyncTable[a[1]]
+            local sMarioB = gPlayerSyncTable[b[1]]
+            return (sMarioA.team or 0) < (sMarioB.team or 0)
+        end
         return a[2] > b[2]
     end)
     return standings
@@ -627,7 +652,7 @@ function do_game_mode_selection(openMenu, doOrder)
                     end
                 end)
                 if not foundMod then
-                    network_send(true, {id = PACKET_NO_MODERATORS})
+                    network_send(true, {id = PACKET_GLOBAL_MSG, text = "\\#ffff50\\Since there were no moderators available, the minigame was selected at random."})
                     gGlobalSyncTable.selectedMode = math.random(0, GAME_MODE_MAX - 2)
                 end
             end
@@ -673,17 +698,190 @@ function toggle_spectator()
         duelLastAttacker = -1
         eliminate_mario(gMarioStates[0])
         djui_chat_message_create("\\#ffff50\\Entered spectator mode.")
-    elseif skipCheck then
-        djui_chat_message_create("\\#ffff50\\Exited spectator mode.")
-    elseif gGlobalSyncTable.eliminationMode and (gGlobalSyncTable.gameMode ~= GAME_MODE_DUEL or not sMario0.validForDuel) then
-        djui_chat_message_create("\\#ffff50\\You will exit spectator after this game.")
-    elseif gGlobalSyncTable.gameMode == GAME_MODE_DUEL and sMario0.validForDuel then
-        if gGlobalSyncTable.duelState == DUEL_STATE_ACTIVE then
-            djui_chat_message_create("\\#ffff50\\You will exit spectator after this round.")
-        else
-            djui_chat_message_create("\\#ffff50\\Exited spectator mode.")
-        end
     else
-        djui_chat_message_create("\\#ffff50\\You will exit spectator after this minigame.")
+        if (sMario0.team == nil or sMario0.team == 0) then
+            sMario0.team = calculate_lowest_member_team()
+        end
+
+        if skipCheck then
+            djui_chat_message_create("\\#ffff50\\Exited spectator mode.")
+        elseif gGlobalSyncTable.eliminationMode and (gGlobalSyncTable.gameMode ~= GAME_MODE_DUEL or not sMario0.validForDuel) then
+            djui_chat_message_create("\\#ffff50\\You will exit spectator after this game.")
+        elseif gGlobalSyncTable.gameMode == GAME_MODE_DUEL and sMario0.validForDuel then
+            if gGlobalSyncTable.duelState == DUEL_STATE_ACTIVE then
+                djui_chat_message_create("\\#ffff50\\You will exit spectator after this round.")
+            else
+                djui_chat_message_create("\\#ffff50\\Exited spectator mode.")
+            end
+        else
+            djui_chat_message_create("\\#ffff50\\You will exit spectator after this minigame.")
+        end
+    end
+end
+
+-- cs support for palettes (copied from Kart Battles)
+function network_player_reset_override_palette_custom(np)
+    if charSelectExists and charSelect.character_get_current_palette_number and charSelect.character_get_current_palette_number(np.localIndex) ~= 0 then
+        -- nothing
+    else
+        return network_player_reset_override_palette(np)
+    end
+end
+
+-- used for team colors (copied from Kart Battles)
+function set_override_team_colors(np, lightColor, darkColor)
+    local m = gMarioStates[np.localIndex]
+    network_player_reset_override_palette_part(np, GLOVES)
+    network_player_reset_override_palette_part(np, SKIN)
+    network_player_reset_override_palette_part(np, SHOES)
+    network_player_reset_override_palette_part(np, HAIR)
+    network_player_set_override_palette_color(np, EMBLEM, darkColor)
+    network_player_set_override_palette_color(np, CAP, lightColor)
+    network_player_set_override_palette_color(np, PANTS, darkColor)
+    network_player_set_override_palette_color(np, SHIRT, lightColor)
+    if m.marioBodyState.modelState & MODEL_STATE_METAL ~= 0 then
+        network_player_set_override_palette_color(np, METAL, lightColor)
+        return
+    end
+end
+
+function network_player_reset_override_palette_part(np, part)
+    network_player_set_override_palette_color(np, part, network_player_get_palette_color(np, part))
+end
+
+-- assigns the specified player to whichever team has the least amount of members (copied from Kart Battles)
+function calculate_lowest_member_team(index_)
+    local index = index_ or 0 -- excludes this player
+    local teamTotal = gGlobalSyncTable.teamCount
+    if teamTotal == 0 then return 0 end
+
+    local teamCounts = {}
+    local possible = {}
+    local minTeamCount = 99
+    for i = 1, teamTotal do
+        table.insert(teamCounts, 0)
+        table.insert(possible, i)
+    end
+
+    for_each_connected_player(function(i)
+        if i ~= index then
+            local team = gPlayerSyncTable[i].team or 0
+            if team ~= 0 then
+                teamCounts[team] = teamCounts[team] + 1
+            end
+        end
+    end)
+    for team, count in pairs(teamCounts) do
+        if count < minTeamCount then
+            possible = { team }
+            minTeamCount = count
+        elseif count == minTeamCount then
+            table.insert(possible, team)
+        end
+    end
+    return possible[math.random(1, #possible)]
+end
+
+-- assign teams based on team selection setting
+function do_team_selection()
+    local teamTotal = gGlobalSyncTable.teamCount
+    if teamTotal == 0 then return end
+
+    local possible = {}
+    local teamCount = {}
+    for team=1,teamTotal do
+        teamCount[team] = 0
+        table.insert(possible, team)
+    end
+
+    local validList = {}
+    local validPlayers = 0
+    for_each_connected_player(function(index)
+        table.insert(validList, index)
+        validPlayers = validPlayers + 1
+        -- consider already assigned players
+        if gGlobalSyncTable.teamSelection == TEAM_SELECTION_HOST then
+            local sMario = gPlayerSyncTable[index]
+            if sMario.team and sMario.team ~= 0 and sMario.team <= teamTotal then
+                local team = sMario.team
+                teamCount[team] = teamCount[team] + 1
+                table.remove(validList, #validList)
+            end
+        end
+    end)
+
+    if #validList == 0 then return end
+
+    local perTeam = validPlayers // teamTotal
+    local extra = validPlayers % teamTotal
+    -- remove teams that already have enough people
+    if gGlobalSyncTable.teamSelection == TEAM_SELECTION_HOST then
+        for team=1,teamTotal do
+            local removeTeam = false
+            if teamCount[team] > perTeam then
+                removeTeam = true
+            elseif teamCount[team] == perTeam then
+                if extra == 0 then
+                    removeTeam = true
+                else
+                    extra = extra - 1
+                end
+            end
+            if removeTeam then
+                local teamIndex = 0
+                for a=1,#possible do
+                    if a == team then
+                        teamIndex = a
+                        break
+                    end
+                end
+                if teamIndex ~= 0 then
+                    table.remove(possible, teamIndex)
+                end
+            end
+        end
+    end
+
+    if #possible == 0 then return end -- hopefully this should never run
+
+    -- shuffle table
+    for i = #validList, 2, -1 do
+        local j = math.random(i)
+        validList[i], validList[j] = validList[j], validList[i]
+    end
+
+    for i,index in ipairs(validList) do
+        local sMario = gPlayerSyncTable[index]
+        local currTeam = sMario.team or 0
+        local teamIndex = 0
+        local team = 0
+        if gGlobalSyncTable.teamSelection ~= TEAM_SELECTION_PLAYER or currTeam == 0 or currTeam > teamTotal then
+            teamIndex = math.random(1, #possible)
+            team = possible[teamIndex]
+        else
+            -- assign based on already chosen team, unless it breaks balance
+            team = currTeam
+            for a=1,#possible do
+                if possible[a] == team then
+                    teamIndex = a
+                    break
+                end
+            end
+            if teamIndex == 0 then
+                teamIndex = math.random(1, #possible)
+                team = possible[teamIndex]
+            end
+        end
+
+        sMario.team = team
+        teamCount[team] = teamCount[team] + 1
+        if teamCount[team] > perTeam then
+            table.remove(possible, teamIndex)
+            extra = extra - 1
+        elseif teamCount[team] == perTeam and extra == 0 then
+            table.remove(possible, teamIndex)
+        end
+
+        if #possible == 0 then break end
     end
 end

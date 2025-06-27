@@ -23,12 +23,22 @@ local hud_hints = {
     "Wah, that big Toad in Red Light, Green Light is a CHEATER! He'll try and fake you out, and will sometimes turn WHILE saying \"Green Light\"! Wah, only I should be allowed to cheat!",
     "Toad again! We're fighting each other with these coins looming above us... it must be a metaphor for something! I just know it!",
     "Wario's favorite game is Glass Bridge! There's NO way to tell which glass pane is safe, even if you've worked in a glass factory! I always wait for someone else to go to see which is the right one, wah ha!",
-    "This mod was a collaboration with many people, too many to list! It's definitely not that I'm afraid I'll forget someone, haha...",
+    "This mod was a collaboration with many people, too many to list in these tips! But most of the programming was done by EmilyEmmi, who is very cool. These tips are not biased, of course.",
     "Wah, they say that not riding the carousel in Mingle is \"cheating\", eh? I'll throw my opponents off and get them in trouble! How's that for cheating, huh?",
     "Star Steal is one of my-a personal favorites! You move slower while holding the Super Star, so you'll need to-a dodge, ha-ha!",
     "It's Toad! I dread playing Bomb Tag... I always get hit at the last second! My advice is to KEEP RUNNING! Screaming also helps! AAAAA!",
     "Hello, I'm Luigi and I find the minigame \"King Of The Hill\" to be an enjoyable experience. I myself am against fighting though, so I just wait until the coast is clear.",
     "I'ma Wario! Want to crush your enemies in Duel or Lights Out? Use the Ground Pound! It deals BIG damage if you can time it right! Give me a cut of the money though, since I invented it!",
+    "Every music track except the one for Mingle was created by murioz! Without her contributions, you'd be listening to Bob-Omb Battlefield over and over...",
+    "The lobby, Mingle, Glass Bridge, and Red Light, green Light maps were created by biobak, who is also working on the upcoming rom hack \"Return To Yoshi's Island\"!",
+    "The King Of The Hill, Toad Town, and Koopa Keep maps were created by Woissel on short notice. Whomp's Fortress was used as a debug map, and you could fall off and lose instantly... it was not fun.",
+    "The Duels map was created by me, EmilyEmmi. That's why it's so barebones compared to the others...",
+    "I'M TOAD AND I HATE LIGHTS OUT! I try to climb the chains to get away, but they're too slippery and I fall and get hurt! OUCH!",
+    "Wah, I was looking into Bomb Tag, and I found out that IT'S RIGGED! They always give the Bob-Ombs to the players with the most points! They must hate winners like me!",
+    "Hello, player. Have you noticed that some doors will refuse to open in Mingle? Apparently, less doors are available after the 3rd round. I hope you find this advice useful.",
+    "You have to look out for-a more than just players in Star Steal! If you fall into lava you'll also lose the Star-a! Be careful!",
+    "I'ma Wario, and I'ma gonna win Duels with my exclusive info! You can get a full heal if you take out another player. It's the perfect strategy, since I'm the best brawler around!",
+    "This mod is brought to you by our (totally legit) sponsors from the Squeex YouTube community! You can see their ads on the monitor in the lobby.",
 }
 function on_hud_render()
     djui_hud_set_resolution(RESOLUTION_N64)
@@ -75,8 +85,14 @@ function on_hud_render()
         table.insert(sideBarLines, "Minigame " .. gGlobalSyncTable.miniGameNum .. "/" .. gGlobalSyncTable.maxMiniGames)
         table.insert(sideBarLines, "")
         local desc = gData.desc
-        if (is_final_duel() or gGlobalSyncTable.eliminationMode) and gData.descElim then
-            desc = gData.descElim
+        if (is_final_duel() or gGlobalSyncTable.eliminationMode) then
+            if gGlobalSyncTable.teamCount == 0 then
+                desc = gData.descElim or desc
+            else
+                desc = gData.descTeamsElim or desc
+            end
+        elseif gGlobalSyncTable.teamCount ~= 0 then
+            desc = gData.descTeams or desc
         end
         add_line_to_table(sideBarLines, desc, lengthLimit)
 
@@ -310,12 +326,16 @@ function on_hud_render()
         local leftToEarn = false
         local prevScore = 0
         local place = 1
+        local newPlace = 0
+        local prevTeam = -1
         for i, data in ipairs(standings) do
             local index = data[1]
             local sMario = gPlayerSyncTable[index]
             local gamePoints = sMario.points or 0
             if not scoreMenuFinal then
                 gamePoints = gamePoints - (sMario.earnedPoints or 0)
+            elseif (not gGlobalSyncTable.eliminatedMode) and sMario.team and sMario.team ~= 0 then
+                gamePoints = data[2]
             end
             local renderY = y
             if standingsBarCurrY[index] and scoreMenuTimer ~= 0 then
@@ -324,14 +344,23 @@ function on_hud_render()
             standingsBarCurrY[index] = renderY
 
             x = (screenWidth - width) / 2
-            djui_hud_set_color(0, 0, 0, 100)
+            if sMario.team == nil or sMario.team == 0 or sMario.team > #TEAM_DATA then
+                djui_hud_set_color(0, 0, 0, 100)
+            else
+                local color = TEAM_DATA[sMario.team][2]
+                djui_hud_set_color(color.r, color.g, color.b, 100)
+            end
             djui_hud_render_rect(x, renderY - 10 * scale, width, 52 * scale)
 
             x = x + 20 * scale
             if not gGlobalSyncTable.eliminationMode then
+                if sMario.team == nil or sMario.team == 0 or sMario.team ~= prevTeam then
+                    newPlace = newPlace + 1
+                    prevTeam = sMario.team
+                end
                 if data[2] ~= prevScore then
                     prevScore = data[2]
-                    place = i
+                    place = newPlace
                 end
                 local text = placeString(place)
                 djui_hud_print_text_with_color_and_outline(text, x, renderY, scale, 255, 2)
@@ -350,6 +379,9 @@ function on_hud_render()
                 end
                 earned = earned - addPointTimer
                 scoreText = "\\#ffff50\\" .. tostring(gamePoints)
+                if scoreMenuFinal and gGlobalSyncTable.teamCount ~= 0 then
+                    scoreText = scoreText .. " (" .. tostring(sMario.points) .. ")"
+                end
             elseif not data[2] then
                 scoreText = "\\#50ff50\\Alive"
             else
@@ -406,18 +438,29 @@ function on_hud_render()
     elseif gGlobalSyncTable.gameState == GAME_STATE_GAME_END then
         local lines = {}
         local winners = get_winners_table()
-        if #winners == 0 then
+        local names = {}
+        local teamCounted = {}
+        for i, index in ipairs(winners) do
+            local sMario = gPlayerSyncTable[index]
+            if sMario.team == nil or sMario.team == 0 or sMario.team > #TEAM_DATA then
+                local text = network_get_player_text_color_string(index) .. gNetworkPlayers[index].name
+                table.insert(names, text)
+            elseif not teamCounted[sMario.team] then
+                teamCounted[sMario.team] = 1
+                local text = TEAM_DATA[sMario.team][3]
+                table.insert(names, text)
+            end
+        end
+
+        if #names == 0 then
             table.insert(lines, "\\#ff2828\\No one won...")
-        elseif #winners == 1 then
-            local index = winners[1]
-            local text = network_get_player_text_color_string(index) ..
-            gNetworkPlayers[index].name .. "\\#ffff50\\ wins!"
+        elseif #names == 1 then
+            local text = names[1] .. "\\#ffff50\\ wins!"
             table.insert(lines, text)
         else
             table.insert(lines, "\\#ffff50\\Winners:")
-            for i, index in ipairs(winners) do
-                local text = network_get_player_text_color_string(index) .. gNetworkPlayers[index].name
-                table.insert(lines, text)
+            for i, name in ipairs(names) do
+                table.insert(lines, name)
             end
         end
 
@@ -517,27 +560,40 @@ function duel_hud()
     height = screenHeight * 0.2
     local dist = duelSideTimer * duelSideTimer * (width / 900)
     local scale = 0.5
+    local toWin = (gGlobalSyncTable.teamCount == 0 and 2) or 3
 
     local comps = {}
+    local teamCounted = {}
     for_each_connected_player(function(index)
         local sMario = gPlayerSyncTable[index]
         if sMario.validForDuel then
-            table.insert(comps, index)
+            if sMario.team == nil or sMario.team == 0 or sMario.team > #TEAM_DATA then
+                local playerColor = network_get_player_text_color_string(index)
+                local name = playerColor .. gNetworkPlayers[index].name
+                local r, g, b = convert_color(playerColor)
+                table.insert(comps, {name, (sMario.roundScore or 0), {r = r, g = g, b = b}})
+            elseif not teamCounted[sMario.team] then
+                teamCounted[sMario.team] = 1
+                local name = TEAM_DATA[sMario.team][3]
+                local color = TEAM_DATA[sMario.team][1]
+                table.insert(comps, {name, (sMario.roundScore or 0), color})
+            end
         end
     end)
     if do_solo_debug() then
         for i=1,MAX_PLAYERS-1 do
-            table.insert(comps, i)
+            table.insert(comps, {tostring(i), math.random(0, toWin-1), {r = 255, g = 255, b = 255}})
         end
     end
+
     while ((#comps+1) // 2) * (height + 20 * scale) >= screenHeight do
         scale = scale / 2
         height = height / 2
     end
-    for i, index in ipairs(comps) do
-        local playerColor = network_get_player_text_color_string(index)
-        local name = playerColor .. gNetworkPlayers[index].name
-        local r, g, b = convert_color(playerColor)
+    for i, compData in ipairs(comps) do
+        local name = compData[1]
+        local score = compData[2]
+        local r, g, b = compData[3].r, compData[3].g, compData[3].b
         r = math.max(r - 50, 0)
         g = math.max(g - 50, 0)
         b = math.max(b - 50, 0)
@@ -564,8 +620,8 @@ function duel_hud()
         if i % 2 == 0 then
             x = screenWidth - 36 * scale + dist - 10
         end
-        for a = 0, 1 do
-            if gPlayerSyncTable[index].roundScore and gPlayerSyncTable[index].roundScore > a then
+        for a = 1, toWin do
+            if score >= a then
                 djui_hud_set_color(255, 255, 255, 255)
             else
                 djui_hud_set_color(0, 0, 0, 180)
@@ -587,6 +643,11 @@ function duel_hud()
 end
 
 -- the menu from geoguessr, which is from shine thief... wow
+local teamNameRef = {"Random"}
+for i=1,#TEAM_DATA do
+    table.insert(teamNameRef, TEAM_DATA[i][3])
+end
+
 local menuSelectedMode = -1
 function build_game_mode_menu(menu)
     for i = 0, GAME_MODE_MAX - 1 do
@@ -606,6 +667,24 @@ function build_game_mode_menu(menu)
                 djui_chat_message_create("Selected \\#ffff50\\" .. gData.name)
                 inMenu = false
             end
+        })
+    end
+end
+
+function build_team_select_menu(menu)
+    for i=0,MAX_PLAYERS-1 do
+        table.insert(menu, {
+            gNetworkPlayers[i].name,
+            function(x)
+                gPlayerSyncTable[i].team = x
+            end,
+            false,
+            function() return (not gNetworkPlayers[i].connected) or gPlayerSyncTable[i].spectator end,
+            currNum = gPlayerSyncTable[i].team or 0,
+            minNum = 0,
+            maxNum = gGlobalSyncTable.teamCount,
+            runOnChange = true,
+            nameRef = teamNameRef,
         })
     end
 end
@@ -670,6 +749,9 @@ menu_data = {
                 if cancelTime >= get_time() - 5 then
                     gGlobalSyncTable.gameState = GAME_STATE_LOBBY
                     gGlobalSyncTable.gameTimer = 0
+                    if gGlobalSyncTable.teamSelection == TEAM_SELECTION_RANDOM then
+                        do_team_selection()
+                    end
                     cancelTime = 0
                     inMenu = false
                 else
@@ -679,6 +761,28 @@ menu_data = {
             end,
             true,
             function() return (gGlobalSyncTable.gameState == GAME_STATE_LOBBY) end,
+        },
+        {
+            "Team",
+            function(x)
+                gPlayerSyncTable[0].team = x
+            end,
+            false,
+            function() return not (gGlobalSyncTable.teamCount ~= 0 and gGlobalSyncTable.teamSelection == TEAM_SELECTION_PLAYER and gGlobalSyncTable.gameState == GAME_STATE_LOBBY) end,
+            runOnChange = true,
+            updateNum = function(button)
+                button.maxNum = gGlobalSyncTable.teamCount or 0
+                local team = gPlayerSyncTable[0].team or 0
+                if team <= button.maxNum then
+                    button.currNum = team
+                else
+                    button.currNum = 0
+                end
+            end,
+            currNum = 0,
+            minNum = 0,
+            maxNum = 0,
+            nameRef = teamNameRef,
         },
         {
             "Open CS Menu",
@@ -746,7 +850,7 @@ menu_data = {
                 gGlobalSyncTable.finalDuel = (x == 1)
             end,
             true,
-            function() return (gGlobalSyncTable.gameModeSelection ~= SELECT_MODE_ALL and gGlobalSyncTable.maxMiniGames <= 1) end,
+            function() return (gGlobalSyncTable.gameModeSelection ~= SELECT_MODE_ALL and gGlobalSyncTable.maxMiniGames <= 1) or gGlobalSyncTable.teamCount == 2 end,
             currNum = (gGlobalSyncTable.finalDuel and 1) or 0,
             minNum = 0,
             maxNum = 1,
@@ -777,6 +881,70 @@ menu_data = {
             maxNum = 100,
             runOnChange = true,
             save = "percentToStart",
+        },
+        {
+            "Teams",
+            function(x)
+                gGlobalSyncTable.teamCount = x
+                if x == 0 then
+                    for i=0,MAX_PLAYERS-1 do
+                        gPlayerSyncTable[i].team = 0
+                    end
+                else
+                    do_team_selection()
+                end
+            end,
+            true,
+            currNum =  gGlobalSyncTable.teamCount,
+            minNum = 0,
+            maxNum = 8,
+            excludeNum = 1,
+            runOnChange = true,
+            nameRef = { "\\#ff5050\\Off" },
+            save = "teamCount",
+        },
+        {
+            "Team Selection",
+            function(x)
+                gGlobalSyncTable.teamSelection = x
+                if x == TEAM_SELECTION_RANDOM then
+                    do_team_selection()
+                end
+            end,
+            true,
+            function()
+                return gGlobalSyncTable.teamCount == 0
+            end,
+            currNum = gGlobalSyncTable.teamSelection,
+            minNum = 0,
+            maxNum = 2,
+            runOnChange = true,
+            nameRef = { "Random", "Host\'s Choice", "Players\' Choice" },
+            save = "teamSelection",
+        },
+        {
+            "Select Teams...",
+            function()
+                enter_menu(6)
+            end,
+            true,
+            function()
+                return gGlobalSyncTable.teamSelection ~= TEAM_SELECTION_HOST or gGlobalSyncTable.teamCount == 0
+            end,
+        },
+        {
+            "Disable CS Movesets",
+            function(x)
+                gGlobalSyncTable.disableCs = (x == 1)
+            end,
+            true,
+            function() return not charSelectExists end,
+            currNum = (gGlobalSyncTable.disableCs and 1) or 0,
+            minNum = 0,
+            maxNum = 1,
+            runOnChange = true,
+            nameRef = { "\\#ff5050\\Off", "\\#50ff50\\On" },
+            save = "disableCs",
         },
     },
     [3] = { buildFunc = build_game_mode_menu }, -- auto built
@@ -809,6 +977,7 @@ menu_data = {
             currNum = 2,
             minNum = 2,
             maxNum = MAX_PLAYERS,
+            runOnChange = true,
         },
         {
             "Dueler 1",
@@ -898,6 +1067,7 @@ menu_data = {
             end,
         },
     },
+    [6] = { buildFunc = build_team_select_menu }, -- auto built
 }
 
 -- show the menu
@@ -1096,7 +1266,7 @@ function menu_controls(m)
 
             if max < button.currNum then
                 button.currNum = min
-            elseif max == button.excludeNum then
+            elseif button.currNum == button.excludeNum then
                 button.currNum = button.currNum + 1
             end
 
@@ -1252,6 +1422,9 @@ function enter_menu(id, option, back)
             elseif type(value) == "number" and value % 1 == 0 then
                 button.currNum = value
             end
+        end
+        if button.updateNum then
+            button.updateNum(button)
         end
     end
 end

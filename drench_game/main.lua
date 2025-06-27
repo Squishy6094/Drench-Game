@@ -1,6 +1,5 @@
 -- name: Drench Game
--- description: Don't leak this.
--- description_actual: Squid Game in Mario 64!\n\nCommissioned by Drenchy\nInspired by Dani's \"Crab Game\"\n\nProgramming: EmilyEmmi\n\nMaps: biobak, EmilyEmmi, Woissil\n\nSoundtrack: murioz\n\nVoice Acting:\nEspi as Toad\nSqueex as Mingle Callout\nTrashcam as Waluigi
+-- description: Squid Game in Mario 64!\n\nCommissioned by Drenchy\nInspired by Dani's \"Crab Game\"\n\nProgramming: EmilyEmmi\n\nMaps: biobak, EmilyEmmi, Woissil\n\nSoundtrack: murioz, Awesome Seal Guy (YT)\n\nVoice Acting:\nEspi as Toad\nSqueex as Mingle Callout\nTrashcam as Waluigi\n\nAds: Squeex's Community
 -- category: gamemode
 -- incompatible: gamemode
 -- pausable: false
@@ -24,6 +23,10 @@ GAME_MODE_MINGLE = 5
 GAME_MODE_LIGHTS_OUT = 6
 GAME_MODE_DUEL = 7 -- needs to be at the end due to its special nature
 GAME_MODE_MAX = 8
+
+TEAM_SELECTION_RANDOM = 0
+TEAM_SELECTION_HOST = 1
+TEAM_SELECTION_PLAYER = 2
 
 LEVEL_LOBBY = level_register('level_SGlobby_entry', COURSE_NONE, 'Lobby', 'lobby', 28000, 0x50, 0x50, 0x50)
 LEVEL_GLASS = level_register('level_bridge_entry', COURSE_NONE, 'Glass Bridge', 'bridge', 28000, 0x28, 0x28, 0x28)
@@ -231,7 +234,7 @@ GAME_MODE_DATA = {
         firstRoundTime = 2 * 60 * 30,       -- 2 minutes
         roundTime = 30 * 30,                -- 30 seconds
         toEliminate = 0.25,                 -- get rid of 1/4 of players
-        marioUpdateFunc = function(m)       -- earn points when holding star, and give to nearest on hit
+        marioUpdateFunc = function(m)       -- earn points when holding star, and give to nearest opponent on hit
             local sMario = gPlayerSyncTable[m.playerIndex]
             local gIndex = network_global_index_from_local(m.playerIndex)
             m.health = 0x880
@@ -250,15 +253,16 @@ GAME_MODE_DATA = {
 
                 if m.hurtCounter ~= 0 then
                     m.hurtCounter = 0
-                    -- give to nearest
+                    -- give to nearest opponent
                     local maxDist = 10000
                     local selectedPlayer = 0
                     for_each_connected_player(function(index)
                         if index == 0 then return end
                         local sMario2 = gPlayerSyncTable[index]
                         if sMario2.eliminated then return end
+                        if (sMario2.team and sMario2.team ~= 0 and sMario2.team == sMario.team) then return end
                         local dist = dist_between_objects(gMarioStates[index].marioObj, m.marioObj)
-                        if (not sMario2.eliminated) and dist < maxDist then
+                        if dist < maxDist then
                             maxDist = dist
                             selectedPlayer = index
                         end
@@ -297,8 +301,7 @@ GAME_MODE_DATA = {
             if m.action == ACT_LAVA_BOOST then
                 set_to_spawn_pos(m, true)
                 if not gPlayerSyncTable[m.playerIndex].holdingBomb then
-                    set_mario_action(m, ACT_GB_FALL, 0)
-                    m.freeze = 30
+                    set_mario_action(m, ACT_SHOCKWAVE_BOUNCE, 0)
                 end
             end
         end,
@@ -373,6 +376,8 @@ GAME_MODE_DATA = {
         "It's a 1v1 (probably)! No gimmicks here- the first person to 2 wins will win this minigame. It's time to LOCK IN.",
         descElim =
         "It's a 1v1 (probably)! No gimmicks here- the first person to get 2 wins, wins it ALL. It's time to LOCK IN.",
+        descTeams = "It's team versus team! No gimmicks here- the first team to get 3 wins will win this minigame. It's time to LOCK IN.",
+        descTeamsElim = "It's team versus team! No gimmicks here- the first team to get 3 wins, wins it ALL. It's time to LOCK IN.",
         level = LEVEL_DUEL,
         interact = PLAYER_INTERACTIONS_PVP,
         maxTime = -1,        -- NO max time
@@ -409,6 +414,8 @@ GAME_MODE_DATA = {
                 end
 
                 local alivePlayers = 0
+                local aliveTeams = 0
+                local teamCounted = {}
                 local duelers = 0
                 local aliveIndex = -1
                 for_each_connected_player(function(index)
@@ -424,23 +431,43 @@ GAME_MODE_DATA = {
                         elseif (not sMario.eliminated) then
                             alivePlayers = alivePlayers + 1
                             aliveIndex = index
-                            if alivePlayers >= 2 then return true end
+                            -- count alive teams
+                            if sMario.team and sMario.team ~= 0 then
+                                if not teamCounted[sMario.team] then
+                                    teamCounted[sMario.team] = 1
+                                    aliveTeams = aliveTeams + 1
+                                end
+                            else
+                                aliveTeams = aliveTeams + 1
+                            end
+                            
+                            if alivePlayers >= 2 and gGlobalSyncTable.teamCount == 0 then return true end
                         end
                     end
                 end)
-                if alivePlayers <= 1 and ((not do_solo_debug()) or alivePlayers <= 0) then
+                if aliveTeams <= 1 and ((not do_solo_debug()) or aliveTeams <= 0) then
                     gGlobalSyncTable.roundTimer = 0
                     gGlobalSyncTable.round = gGlobalSyncTable.round + 1
                     gGlobalSyncTable.duelState = DUEL_STATE_END
+                    local toWin = (gGlobalSyncTable.teamCount == 0 and 2) or 3
                     if aliveIndex ~= -1 then
                         local sMario = gPlayerSyncTable[aliveIndex]
                         if duelers <= 1 then
-                            sMario.roundScore = 2 -- end immediately
+                            sMario.roundScore = toWin -- end immediately
                         else
                             sMario.roundScore = sMario.roundScore + 1
                         end
-                        if sMario.roundScore >= 2 then
+                        if sMario.roundScore >= toWin then
                             sMario.victory = true
+                            -- make sure all teammates also win
+                            if sMario.team and sMario.team ~= 0 then
+                                for_each_connected_player(function(i)
+                                    local sMario2 = gPlayerSyncTable[i]
+                                    if sMario2.team == sMario.team then
+                                        sMario2.victory = true
+                                    end
+                                end)
+                            end
                             return true -- end game
                         end
                     end
@@ -484,7 +511,7 @@ GAME_MODE_DATA = {
             local sMario0 = gPlayerSyncTable[0]
             if gGlobalSyncTable.duelState == DUEL_STATE_WAIT then
                 duelEnding = false
-                if sMario0.validForDuel then
+                if sMario0.validForDuel and not sMario0.spectator then
                     sMario0.eliminated = false
                     m0.health = 0x880
                     if m0.action == ACT_SPECTATE then m0.action = ACT_FREEFALL end
@@ -494,6 +521,7 @@ GAME_MODE_DATA = {
             duelLastState = gGlobalSyncTable.duelState
 
             -- slow down time on KO
+            local toWin = (gGlobalSyncTable.teamCount == 0 and 2) or 3
             local aliveIndex = -1
             local alivePlayers = 0
             local someoneDying = false
@@ -513,7 +541,7 @@ GAME_MODE_DATA = {
             if alivePlayers < 2 and someoneDying and m0.area and m0.area.localAreaTimer % 2 == 0 then
                 if alivePlayers == 1 then
                     local sMario = gPlayerSyncTable[aliveIndex]
-                    duelEnding = (sMario.roundScore >= 1)
+                    duelEnding = (sMario.roundScore >= toWin - 1)
                 else
                     duelEnding = false
                 end
@@ -531,6 +559,14 @@ GAME_MODE_DATA = {
                 localWasEliminated = true
                 return
             end
+
+            -- make sure we have the same score as our teammates
+            for_each_connected_player(function(i)
+                local sMario2 = gPlayerSyncTable[i]
+                if sMario2.team == sMario.team and sMario2.roundScore > sMario.roundScore then
+                    sMario.roundScore = sMario2.roundScore
+                end
+            end)
 
             -- one health in sudden death
             if m.health > 0x100 and gGlobalSyncTable.freezeRoundTimer then
@@ -592,6 +628,19 @@ LEVEL_SPAWN_DATA = {
     },
 }
 
+-- team data (copied from Kart Battles)
+-- in order: light color, dark color, full name (+ color code), short name
+TEAM_DATA = {
+    { { r = 225, g = 5, b = 49 },       { r = 80, g = 20, b = 20 },       "\\#ff4040\\Red Team",    "Red" }, -- red (modified ruby)
+    { { r = 0x00, g = 0x2f, b = 0xc8 }, { r = 20, g = 40, b = 80 },       "\\#4040ff\\Blue Team",   "Blu" }, -- blue (modified cobalt)
+    { { r = 0x20, g = 0xc8, b = 0x20 }, { r = 20, g = 80, b = 20 },       "\\#40ff40\\Green Team",  "Grn" }, -- green (modified clover)
+    { { r = 0xe7, g = 0xe7, b = 0x21 }, { r = 80, g = 80, b = 20 },       "\\#ffff40\\Yellow Team", "Ylw" }, -- yellow (modified busy bee)
+    { { r = 0xff, g = 0x8a, b = 0x00 }, { r = 80, g = 50, b = 20 },       "\\#ffa014\\Orange Team", "Org" }, -- orange (modified... orange)
+    { { r = 0x5a, g = 0x94, b = 0xff }, { r = 20, g = 50, b = 80 },       "\\#40ffff\\Cyan Team",   "Cyn" }, -- cyan (modified azure)
+    { { r = 0xff, g = 0x8e, b = 0xb2 }, { r = 0x82, g = 0x10, b = 0x27 }, "\\#ffa1eb\\Pink Team",   "Pnk" }, -- pink (modified bubblegum)
+    { { r = 0x71, g = 0x36, b = 0xc8 }, { r = 0x26, g = 0x26, b = 0x47 }, "\\#a040ff\\Violet Team", "Vlt" }, -- violet (modified waluigi)
+}
+
 SELECT_MODE_CHOOSE = 0
 SELECT_MODE_ORDER = 1
 SELECT_MODE_RANDOM = 2
@@ -620,6 +669,9 @@ gGlobalSyncTable.percentToStart = 75
 gGlobalSyncTable.forceStart = false
 gGlobalSyncTable.allDuel = false
 gGlobalSyncTable.gameLevelOverride = -1
+gGlobalSyncTable.teamCount = 0
+gGlobalSyncTable.teamSelection = TEAM_SELECTION_RANDOM
+gGlobalSyncTable.disableCs = false
 
 gGlobalSyncTable.starStealOwner = 255
 gGlobalSyncTable.minglePlayerCount = 1
@@ -661,6 +713,7 @@ function load_on_sync()
     sMario.victory = false
     sMario.validForDuel = gGlobalSyncTable.allDuel
     sMario.rejoinID = get_coopnet_id(0)
+    sMario.team = calculate_lowest_member_team()
     if sMario.rejoinID == "-1" then
         sMario.rejoinID = gNetworkPlayers[0].name
     end
@@ -857,6 +910,16 @@ function mario_update(m)
             end
         end
     end
+    
+    -- team palette
+    if sMario.team and sMario.team ~= 0 and gGlobalSyncTable.teamMode ~= 0 then
+        local data = TEAM_DATA[sMario.team or 0]
+        if data then
+            set_override_team_colors(np, data[1], data[2])
+        end
+    else
+        network_player_reset_override_palette_custom(np)
+    end
 
     -- bouncy beds
     if marioBounceTimer[m.playerIndex] == nil then
@@ -926,7 +989,7 @@ function mario_update(m)
         if not gData.fallDamage then
             m.peakHeight = m.pos.y -- disable fall damage
         end
-        if sMario.spectator and not sMario.eliminated then
+        if m.playerIndex == 0 and sMario.spectator and not sMario.eliminated then
             eliminate_mario(m)
         end
     else
@@ -935,43 +998,72 @@ function mario_update(m)
     end
 
     -- set description
+    local highlight = false
+    local desc = ""
     if sMario.spectator then
         network_player_set_description(np, "Spectator", 100, 100, 100, 255)
     elseif gGlobalSyncTable.gameState == GAME_STATE_LOBBY then
         if sMario.ready then
-            network_player_set_description(np, "Ready!", 80, 255, 80, 255)
+            highlight = true
+            desc = "Ready!"
         else
-            network_player_set_description(np, "Waiting..", 255, 80, 80, 255)
+            desc = "Waiting..."
         end
     elseif gGlobalSyncTable.gameState == GAME_STATE_GAME_END then
         if gGlobalSyncTable.eliminationMode then
             if sMario.eliminated then
-                network_player_set_description(np, "Dead", 255, 40, 40, 255)
+                desc = "Dead"
             else
-                network_player_set_description(np, "Alive", 80, 255, 80, 255)
+                highlight = true
+                desc = "Alive"
             end
-        else
+        elseif gGlobalSyncTable.teamCount == 0 then
             network_player_set_description(np, tostring(sMario.points or 0), 255, 255, 255, 255)
+        else
+            local points = sMario.points
+            for_each_connected_player(function(i)
+                local sMario2 = gPlayerSyncTable[i]
+                if (i ~= m.playerIndex) and sMario2.team == sMario.team and sMario2.team ~= 0 then
+                    points = points + sMario2.points
+                end
+            end)
+            network_player_set_description(np, tostring(points) .. " (" .. tostring(sMario.points or 0) .. ")", 255, 255, 255, 255)
         end
     elseif (gGlobalSyncTable.gameMode == GAME_MODE_DUEL and sMario.validForDuel) then
-        if sMario.eliminated then
-            network_player_set_description(np, tostring(sMario.roundScore or 0), 255, 80, 80, 255)
-        else
-            network_player_set_description(np, tostring(sMario.roundScore or 0), 80, 255, 80, 255)
-        end
+        highlight = (not sMario.eliminated)
+        desc = tostring(sMario.roundScore or 0)
     elseif sMario.eliminated then
-        network_player_set_description(np, "Dead", 255, 40, 40, 255)
+        desc = "Dead"
     elseif (gGlobalSyncTable.gameState ~= GAME_STATE_LOBBY) and gData.toEliminate and gData.toEliminate ~= 0 then
         -- faded red or green based on our placement
-        if sMario.roundScore and sMario.roundScore >= storedSafeScore then
-            network_player_set_description(np, tostring(sMario.roundScore or 0), 80, 255, 80, 255)
-        else
-            network_player_set_description(np, tostring(sMario.roundScore or 0), 255, 80, 80, 255)
-        end
+        highlight = (sMario.roundScore and sMario.roundScore >= storedSafeScore)
+        desc = tostring(sMario.roundScore or 0)
     elseif gGlobalSyncTable.gameState == GAME_STATE_ACTIVE and gGlobalSyncTable.gameMode == GAME_MODE_BOMB_TAG and sMario.holdingBomb then
-        network_player_set_description(np, "Bomb", 255, 255, 80, 255)
+        desc = "Bomb"
     else
-        network_player_set_description(np, "Alive", 80, 255, 80, 255)
+        highlight = true
+        desc = "Alive"
+    end
+    if desc ~= "" then
+        local color = {}
+        local alpha = 255
+        if sMario.team == nil or sMario.team == 0 or sMario.team > #TEAM_DATA then
+            if desc == "Bomb" then
+                color = {r = 255, g = 255, b = 80}
+            elseif highlight then
+                color = {r = 80, g = 255, b = 80}
+            elseif desc == "Dead" then
+                color = {r = 255, g = 40, b = 40}
+            else
+                color = {r = 255, g = 80, b = 80}
+            end
+        else
+            color = TEAM_DATA[sMario.team][1]
+            if not highlight then
+                alpha = 100
+            end
+        end
+        network_player_set_description(np, desc, color.r, color.g, color.b, alpha)
     end
 
     if m.playerIndex ~= 0 then
@@ -992,6 +1084,9 @@ function mario_update(m)
         sMario.eliminated = false
         sMario.roundEliminated = 0
         sMario.holdingBomb = false
+        if sMario.spectator then
+            sMario.team = 0
+        end
     elseif gGlobalSyncTable.gameState == GAME_STATE_GAME_END then
         warpLevel = LEVEL_LOBBY
         gNametagsSettings.showHealth = false
@@ -1068,6 +1163,12 @@ hook_event(HOOK_MARIO_UPDATE, mario_update)
 
 -- update function; handles game timers, lighting, and some parts of certain minigames.
 function update()
+    -- CS support
+    if charSelectExists then
+        charSelect.restrict_palettes(gGlobalSyncTable.teamMode == 0)
+        charSelect.restrict_movesets(gGlobalSyncTable.disableCs)
+    end
+
     local np0 = gNetworkPlayers[0]
     if np0.currLevelNum == LEVEL_LIGHTS_OUT then
         -- lighting during Lights Out
@@ -1240,9 +1341,16 @@ function update()
             gGlobalSyncTable.gameTimer = gGlobalSyncTable.gameTimer + 1
 
             if gGlobalSyncTable.gameTimer >= 150 then
+                if gGlobalSyncTable.teamCount == 2 then
+                    gGlobalSyncTable.finalDuel = false
+                end
+
                 do_game_mode_selection((gGlobalSyncTable.gameTimer == 150))
 
                 if gGlobalSyncTable.selectedMode ~= -1 then
+                    if gGlobalSyncTable.teamSelection ~= TEAM_SELECTION_RANDOM then
+                        do_team_selection()
+                    end
                     gGlobalSyncTable.gameState = GAME_STATE_RULES
 
                     gGlobalSyncTable.gameMode = gGlobalSyncTable.selectedMode
@@ -1287,10 +1395,20 @@ function update()
         gGlobalSyncTable.gameTimer = gGlobalSyncTable.gameTimer + 1
         local miniGameEnd = true
         local alivePlayers = 0
+        local aliveTeams = 0
+        local teamCounted = {}
         for_each_connected_player(function(i)
             local sMario = gPlayerSyncTable[i]
             if not sMario.eliminated then
                 alivePlayers = alivePlayers + 1
+                if sMario.team and sMario.team ~= 0 then
+                    if not teamCounted[sMario.team] then
+                        teamCounted[sMario.team] = 1
+                        aliveTeams = aliveTeams + 1
+                    end
+                else
+                    aliveTeams = aliveTeams + 1
+                end
                 if not sMario.victory then
                     miniGameEnd = false
                 end
@@ -1311,7 +1429,7 @@ function update()
         end
 
         -- end early in elimination-type minigames
-        if (not gData.victoryFunc) and alivePlayers <= 1 and not do_solo_debug() then
+        if (not gData.victoryFunc) and (aliveTeams <= 1) and not do_solo_debug() then
             miniGameEnd = true
         end
 
@@ -1337,7 +1455,32 @@ function update()
 
             -- end early in elimination-type minigames
             alivePlayers = alivePlayers - eliminated
-            if (not gData.victoryFunc) and alivePlayers <= 1 and not do_solo_debug() then
+            aliveTeams = alivePlayers
+            if gGlobalSyncTable.teamCount ~= 0 then
+                -- do a recount
+                alivePlayers = 0
+                aliveTeams = 0
+                teamCounted = {}
+                for_each_connected_player(function(i)
+                    local sMario = gPlayerSyncTable[i]
+                    if not sMario.eliminated then
+                        alivePlayers = alivePlayers + 1
+                        if sMario.team and sMario.team ~= 0 then
+                            if not teamCounted[sMario.team] then
+                                teamCounted[sMario.team] = 1
+                                aliveTeams = aliveTeams + 1
+                            end
+                        else
+                            aliveTeams = aliveTeams + 1
+                        end
+                        if not sMario.victory then
+                            miniGameEnd = false
+                        end
+                    end
+                    --if (not miniGameEnd) and (alivePlayers > 1) then return true end
+                end)
+            end
+            if (not gData.victoryFunc) and (aliveTeams <= 1) and not do_solo_debug() then
                 miniGameEnd = true
             end
             
@@ -1362,7 +1505,28 @@ function update()
             gGlobalSyncTable.gameState = GAME_STATE_MINI_END
 
             if not gGlobalSyncTable.eliminationMode then
+                -- adjust points in team mode to make uneven teams more fair
+                local teamMultiplier = {}
+                if gGlobalSyncTable.teamCount ~= 0 then
+                    local countPerTeam = {}
+                    local validPlayers = 0
+                    for_each_connected_player(function(i)
+                        validPlayers = validPlayers + 1
+                        local sMario = gPlayerSyncTable[i]
+                        if countPerTeam[sMario.team] then
+                            countPerTeam[sMario.team] = countPerTeam[sMario.team] + 1
+                        else
+                            countPerTeam[sMario.team] = 1
+                        end
+                    end)
+                    local expectedPerTeam = math.ceil(validPlayers / gGlobalSyncTable.teamCount)
+                    for team,count in pairs(countPerTeam) do
+                        teamMultiplier[team] = expectedPerTeam / count
+                    end
+                end
+
                 -- calculate scores if we won, or if there is no victory condition and we survived
+                local didMultiplier = false
                 for_each_connected_player(function(i)
                     local sMario = gPlayerSyncTable[i]
                     if sMario.points == nil then sMario.points = 0 end
@@ -1375,7 +1539,15 @@ function update()
                     elseif gData.toEliminate and gGlobalSyncTable.round > 1 and sMario.roundEliminated and sMario.roundEliminated >= 1 then
                         sMario.earnedPoints = math.floor(((sMario.roundEliminated - 1) / gGlobalSyncTable.round) * 20) -- points based on total rounds
                     end
+                    
+                    if sMario.team and teamMultiplier[sMario.team] and teamMultiplier[sMario.team] ~= 1 then
+                        sMario.earnedPoints = math.ceil(sMario.earnedPoints * teamMultiplier[sMario.team])
+                        didMultiplier = true
+                    end
                 end)
+                if didMultiplier and not is_final_duel() then
+                    network_send_include_self(true, {id = PACKET_GLOBAL_MSG, text = "\\#ffff50\\Points adjusted to account for uneven teams."})
+                end
             elseif gData.victoryFunc then
                 -- eliminate anyone who didn't win if there was a victory condition
                 for_each_connected_player(function(i)
@@ -1434,34 +1606,46 @@ function update()
         end
 
         if gGlobalSyncTable.gameTimer >= 480 then
-            local alivePlayers = 3
+            local alivePlayers = MAX_PLAYERS
+            local aliveTeams = alivePlayers
             local aliveTable = {}
             if gGlobalSyncTable.eliminationMode then
                 alivePlayers = 0
+                aliveTeams = 0
+                local teamCounted = {}
                 for_each_connected_player(function(i)
                     local sMario = gPlayerSyncTable[i]
                     if not sMario.eliminated then
                         alivePlayers = alivePlayers + 1
                         table.insert(aliveTable, i)
+                        if sMario.team and sMario.team ~= 0 then
+                            if not teamCounted[sMario.team] then
+                                teamCounted[sMario.team] = 1
+                                aliveTeams = aliveTeams + 1
+                            end
+                        else
+                            aliveTeams = aliveTeams + 1
+                        end
                         --if alivePlayers > 2 then return true end
                     end
                 end)
             end
 
-            if (not do_solo_debug()) and alivePlayers <= 1 then
+            if (not do_solo_debug()) and (aliveTeams <= 1) then
                 end_game()
             else
                 if gGlobalSyncTable.miniGameNum >= gGlobalSyncTable.maxMiniGames then
                     end_game()
                 else
                     -- select new mode
-                    if gGlobalSyncTable.finalDuel and ((gGlobalSyncTable.miniGameNum == gGlobalSyncTable.maxMiniGames - 1) or (alivePlayers == 2)) then
+                    if gGlobalSyncTable.finalDuel and ((gGlobalSyncTable.miniGameNum == gGlobalSyncTable.maxMiniGames - 1) or (aliveTeams == 2)) then
                         -- do ending duel
                         gGlobalSyncTable.allDuel = false
                         for i = 0, MAX_PLAYERS - 1 do
                             gPlayerSyncTable[i].validForDuel = false
                         end
 
+                        local prevTeam = -1
                         if gGlobalSyncTable.eliminationMode then
                             for i, index in ipairs(aliveTable) do
                                 local sMario = gPlayerSyncTable[index]
@@ -1480,11 +1664,15 @@ function update()
                                         break
                                     end
                                 end
-                                gPlayerSyncTable[index].validForDuel = true
+                                local sMario = gPlayerSyncTable[index]
+                                sMario.validForDuel = true
                                 table.remove(standings, 1)
-                                numValid = numValid + 1
+                                if sMario.team == nil or sMario.team == 0 or sMario.team ~= prevTeam then
+                                    numValid = numValid + 1
+                                end
                             end
                         end
+
                         gGlobalSyncTable.selectedMode = GAME_MODE_DUEL
                     else
                         do_game_mode_selection((gGlobalSyncTable.gameTimer == 480), true)
@@ -1494,8 +1682,7 @@ function update()
                         gGlobalSyncTable.gameTimer = 0
                         gGlobalSyncTable.miniGameNum = gGlobalSyncTable.miniGameNum + 1
                         gGlobalSyncTable.gameMode = gGlobalSyncTable.selectedMode
-                        gGlobalSyncTable.eliminateThisRound = calculate_players_to_eliminate(not gGlobalSyncTable
-                        .eliminationMode)
+                        gGlobalSyncTable.eliminateThisRound = calculate_players_to_eliminate(not gGlobalSyncTable.eliminationMode)
                         gGlobalSyncTable.gameState = GAME_STATE_RULES
                         -- pick toad town or koopa keep at random
                         local gData = GAME_MODE_DATA[gGlobalSyncTable.gameMode or 0]
@@ -1519,6 +1706,9 @@ function update()
         if gGlobalSyncTable.gameTimer >= 450 then
             gGlobalSyncTable.gameState = GAME_STATE_LOBBY
             gGlobalSyncTable.gameTimer = 0
+            if gGlobalSyncTable.teamSelection == TEAM_SELECTION_RANDOM then
+                do_team_selection()
+            end
         end
     end
 end
@@ -1629,6 +1819,7 @@ function on_player_disconnected(m)
         table.insert(rejoin_data, {
             id = PACKET_REJOIN,
             rejoinID = rejoinID,
+            team = sMario.team,
             leftMiniGame = gGlobalSyncTable.miniGameNum,
             leftRound = gGlobalSyncTable.round,
             points = sMario.points or 0,
@@ -1636,6 +1827,7 @@ function on_player_disconnected(m)
             roundScore = sMario.roundScore or 0,
             eliminated = sMario.eliminated,
             roundEliminated = sMario.roundEliminated or 0,
+            validForDuel = sMario.validForDuel or false,
         })
         sMario.rejoinID = "-1"
     end
@@ -1789,10 +1981,12 @@ function on_packet_rejoin(data, self)
     djui_chat_message_create("\\#ffff50\\Your progress was restored!")
     local sMario = gPlayerSyncTable[0]
     sMario.points = data.points or 0
+    sMario.team = data.team or sMario.team
     -- only restore certain values if we're on the same mini game we left on
     if gGlobalSyncTable.miniGameNum == data.leftMiniGame and gGlobalSyncTable.gameState ~= GAME_STATE_SCORES then
         sMario.roundScore = data.roundScore or 0
         sMario.earnedPoints = data.earnedPoints or 0
+        sMario.validForDuel = gGlobalSyncTable.allDuel or data.validForDuel
         if gGlobalSyncTable.round == data.leftRound and data.eliminated ~= nil then
             sMario.eliminated = data.eliminated
             sMario.roundEliminated = data.roundEliminated or 0
@@ -1813,8 +2007,8 @@ function on_packet_mod_choose(data, self)
     djui_chat_message_create("\\#ffff50\\Since you're the first moderator available, you will pick this minigame!")
 end
 
-function on_packet_no_moderators(data, self)
-    djui_chat_message_create("\\#ffff50\\Since there were no moderators available, the minigame was selected at random.")
+function on_packet_global_msg(data, self)
+    djui_chat_message_create(data.text)
 end
 
 function on_packet_damage(data, self)
@@ -1837,7 +2031,7 @@ PACKET_MINGLE_RESTART = 2
 PACKET_REJOIN = 3
 PACKET_BLACKOUT = 4
 PACKET_MOD_CHOOSE = 5
-PACKET_NO_MODERATORS = 6
+PACKET_GLOBAL_MSG = 6
 PACKET_DAMAGE = 7
 PACKET_KILL = 8
 sPacketTable = {
@@ -1847,7 +2041,7 @@ sPacketTable = {
     [PACKET_REJOIN] = on_packet_rejoin,
     [PACKET_BLACKOUT] = on_packet_blackout,
     [PACKET_MOD_CHOOSE] = on_packet_mod_choose,
-    [PACKET_NO_MODERATORS] = on_packet_no_moderators,
+    [PACKET_GLOBAL_MSG] = on_packet_global_msg,
     [PACKET_DAMAGE] = on_packet_damage,
     [PACKET_KILL] = on_packet_kill,
 }
