@@ -1,28 +1,30 @@
--- Inconsistent file types are mainly because I used whichever type was smallest
--- (some music also only existed as mp3)
+-- All Files are .ogg format
+-- Music is compressed to 22050 Hz and Sounds are compressed to 16000
+
+local musicBitrate = 22050
 local musicData = {
-    lobby = {audio = audio_stream_load("lobby.ogg"), loop = true},
-    dire = {audio = audio_stream_load("dire.ogg"), loop = true, loopStart = 2188700, loopEnd = 6789957},
-    scores = {audio = audio_stream_load("scores.ogg"), loop = true, loopStart = 883309, loopEnd = -1},
-    mingle = {audio = audio_stream_load("mingle.mp3")},
-    final = {audio = audio_stream_load("final.mp3"), loop = true, loopStart = 1616135, loopEnd = 7158082},
-    slider = {audio = audio_stream_load("sliderMadness1.ogg"), loop = true, loopStart = 143624, loopEnd = -1},
-    slider2 = {audio = audio_stream_load("sliderMadness2.ogg"), loop = true},
-    slider3 = {audio = audio_stream_load("sliderMadness3.ogg"), loop = true},
-    finalOutro = {audio = audio_stream_load("finaloutro.ogg")},
+    lobby = {audio = audio_stream_load("music-lobby.ogg"), loop = true},
+    dire = {audio = audio_stream_load("music-dire.ogg"), loop = true, loopStart = 49.630, loopEnd = 152.967},
+    scores = {audio = audio_stream_load("music-scores.ogg"), loop = true, loopStart = 20.029, loopEnd = -1},
+    mingle = {audio = audio_stream_load("music-mingle.ogg")},
+    final = {audio = audio_stream_load("music-final.ogg"), loop = true, loopStart = 36.647, loopEnd = 162.314},
+    slider = {audio = audio_stream_load("music-slider-madness-1.ogg"), loop = true, loopStart = 3.256, loopEnd = -1},
+    slider2 = {audio = audio_stream_load("music-slider-madness-2.ogg"), loop = true},
+    slider3 = {audio = audio_stream_load("music-slider-madness-3.ogg"), loop = true},
+    finalOutro = {audio = audio_stream_load("music-final-outro.ogg")},
 }
 
 local soundData = {
-    redLight = audio_sample_load("redLight.mp3"),
-    redLightShort = audio_sample_load("redLightShort.ogg"),
-    redLightLong = audio_sample_load("redLightLong.ogg"),
-    greenLight = audio_sample_load("greenLight.ogg"),
-    greenLightShort = audio_sample_load("greenLightShort.ogg"),
-    greenLightLong = audio_sample_load("greenLightLong.ogg"),
-    playerCallout1 = audio_sample_load("playerCallout1.mp3"),
-    playerCallout2 = audio_sample_load("playerCallout2.mp3"),
-    playerCallout3 = audio_sample_load("playerCallout3.mp3"),
-    playerCallout4 = audio_sample_load("playerCallout4.mp3"),
+    redLight = audio_sample_load("sound-light-red.ogg"),
+    redLightShort = audio_sample_load("sound-light-red-short.ogg"),
+    redLightLong = audio_sample_load("sound-light-red-long.ogg"),
+    greenLight = audio_sample_load("sound-light-green.ogg"),
+    greenLightShort = audio_sample_load("sound-light-green-short.ogg"),
+    greenLightLong = audio_sample_load("sound-light-green-long.ogg"),
+    playerCallout1 = audio_sample_load("sound-mingle-callout-1.ogg"),
+    playerCallout2 = audio_sample_load("sound-mingle-callout-2.ogg"),
+    playerCallout3 = audio_sample_load("sound-mingle-callout-3.ogg"),
+    playerCallout4 = audio_sample_load("sound-mingle-callout-4.ogg"),
 }
 
 -- set current streamed music and update volume
@@ -64,7 +66,7 @@ function update_music(music)
         audio_stream_play(thisMusic.audio, true, 1)
         audio_stream_set_looping(thisMusic.audio, thisMusic.loop or false)
         if thisMusic.loopEnd then
-            audio_stream_set_loop_points(thisMusic.audio, thisMusic.loopStart or 0, thisMusic.loopEnd)
+            audio_stream_set_loop_points(thisMusic.audio, (thisMusic.loopStart or 0) * musicBitrate, (thisMusic.loopEnd or -1) * musicBitrate)
         end
         audio_stream_set_position(thisMusic.audio, 0)
     end
